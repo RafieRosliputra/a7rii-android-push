@@ -6,3 +6,4 @@ local.properties
 .idea/
 *.iml
 .live-upload-import.tgz
+.live-upload-git.tgz
