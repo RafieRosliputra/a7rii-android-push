@@ -50,7 +50,7 @@ public class LiveApi {
         c.setReadTimeout(timeoutMs);
         c.setRequestMethod(method);
         c.setRequestProperty("Accept", "application/json");
-        c.setRequestProperty("User-Agent", "JSTether/3");
+        c.setRequestProperty("User-Agent", "JSTether/4");
         if (token != null) c.setRequestProperty("Authorization", "Bearer " + token);
         try {
             if (body != null) {
@@ -133,8 +133,20 @@ public class LiveApi {
     }
 
     /** Start a chunked upload into this photographer's "Photographer N" folder (event comes from the session). */
-    public JSONObject startUpload(String eventId, String name, long size) throws IOException {
-        return json("POST", "/api/shoot/uploads", obj("name", name, "size", size));
+    public JSONObject startUpload(String eventId, String name, long size, String key) throws IOException {
+        JSONObject b = obj("name", name, "size", size);
+        if (key != null) try { b.put("key", key); } catch (JSONException ignored) {}
+        return json("POST", "/api/shoot/uploads", b);
+    }
+
+    /** Which of these keys (name|size|time taken) are already in the event. */
+    public java.util.Set<String> sentKeys(java.util.List<String> keys) throws IOException {
+        JSONArray a = new JSONArray();
+        for (String k : keys) a.put(k);
+        JSONArray r = json("POST", "/api/shoot/check", obj("keys", a)).optJSONArray("sent");
+        java.util.Set<String> out = new java.util.HashSet<>();
+        if (r != null) for (int i = 0; i < r.length(); i++) out.add(r.optString(i));
+        return out;
     }
 
     /** How many bytes the server already has (to resume). */

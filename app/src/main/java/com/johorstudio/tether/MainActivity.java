@@ -45,6 +45,7 @@ import java.util.Locale;
 public class MainActivity extends Activity implements TetherService.Listener {
     private static final String ACTION_USB_PERMISSION = "com.johorstudio.tether.USB_PERMISSION";
     private static final int REQ_PICK_FOLDER = 42;
+    private static final int REQ_PICK_PHOTOS = 43;
 
     // JohorStudio.com colours
     private static final int BG = Color.rgb(22, 28, 31), CARD = Color.rgb(32, 39, 43), TEAL = Color.rgb(31, 111, 104),
@@ -362,6 +363,10 @@ public class MainActivity extends Activity implements TetherService.Listener {
                     if (s != null) s.retryNow();
                 }})));
 
+        root.addView(row(
+                button("Upload gambar dari telefon", true, new View.OnClickListener() { @Override public void onClick(View v) { pickPhotos(); } }),
+                button("Senarai upload", false, new View.OnClickListener() { @Override public void onClick(View v) { showUploads(); } })));
+
         root.addView(toggle("Hantar ke server", "upload_on", true));
         root.addView(toggle("Skrin sentiasa ON", "keep_screen", true));
         root.addView(toggle("Kecerahan minimum (bila app dibuka)", "dim", false));
@@ -461,6 +466,76 @@ public class MainActivity extends Activity implements TetherService.Listener {
         logScroll.post(new Runnable() { @Override public void run() { logScroll.fullScroll(ScrollView.FOCUS_DOWN); } });
     }
 
+    // ------------------------------------------------------------------ manual upload
+
+    /** Photos copied from the camera to the phone: pick them, they go through the same queue (WebP, retry, skip if sent). */
+    private void pickPhotos() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("image/jpeg");
+        i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(i, REQ_PICK_PHOTOS);
+    }
+
+    private void gotPhotos(Intent data) {
+        final java.util.List<Uri> uris = new java.util.ArrayList<>();
+        if (data.getClipData() != null) for (int k = 0; k < data.getClipData().getItemCount(); k++) uris.add(data.getClipData().getItemAt(k).getUri());
+        else if (data.getData() != null) uris.add(data.getData());
+        for (Uri u : uris) {
+            // keep access after a restart, so the queue can still read the file
+            try { getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
+        }
+        if (uris.isEmpty()) return;
+        toast(uris.size() + " gambar dipilih, semak dengan server…");
+        TetherService s = TetherService.get();
+        if (s != null) { s.addManual(uris); return; }
+        // no camera yet: start the service for the upload queue, then hand the photos over
+        TetherService.start(this, null);
+        final android.os.Handler h = new android.os.Handler();
+        h.postDelayed(new Runnable() {
+            int tries = 0;
+            @Override public void run() {
+                TetherService x = TetherService.get();
+                if (x != null) x.addManual(uris);
+                else if (++tries < 20) h.postDelayed(this, 250);
+                else toast("Tak dapat mula servis upload");
+            }
+        }, 250);
+    }
+
+    /** Which photos are sent, waiting or failed (kept across restarts). */
+    private void showUploads() {
+        TetherService s = TetherService.get();
+        if (s == null) { toast("Sambung kamera atau pilih gambar dulu"); return; }
+        java.util.List<String[]> rows = s.uploadRows();
+        LinearLayout list = column();
+        list.setPadding(dp(18), dp(8), dp(18), dp(8));
+        list.setBackgroundColor(Color.WHITE);
+        if (rows.isEmpty()) list.addView(text("Belum ada gambar dihantar.", 14, Color.GRAY, false));
+        int n = 0;
+        for (String[] r : rows) {
+            if (++n > 300) break;
+            LinearLayout line = new LinearLayout(this);
+            line.setOrientation(LinearLayout.HORIZONTAL);
+            TextView a = text(r[0], 14, Color.BLACK, false);
+            a.setSingleLine(true); a.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+            TextView b = text(r[1], 13, r[1].startsWith("Sudah") ? Color.rgb(46, 125, 79) : r[1].startsWith("Gagal") ? Color.rgb(163, 48, 42) : Color.rgb(102, 115, 122), false);
+            b.setPadding(dp(10), 0, 0, 0);
+            line.addView(a, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            line.addView(b);
+            line.setPadding(0, dp(5), 0, dp(5));
+            list.addView(line);
+        }
+        ScrollView sv = new ScrollView(this);
+        sv.addView(list);
+        new AlertDialog.Builder(this).setTitle("Senarai upload").setView(sv)
+                .setPositiveButton("Cuba hantar sekarang", new DialogInterface.OnClickListener() { @Override public void onClick(DialogInterface d, int w) {
+                    TetherService x = TetherService.get(); if (x != null) x.retryNow();
+                }})
+                .setNegativeButton("Tutup", null).show();
+    }
+
     // ------------------------------------------------------------------ phone folder
 
     private void pickFolder() {
@@ -480,6 +555,7 @@ public class MainActivity extends Activity implements TetherService.Listener {
 
     @Override protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
+        if (req == REQ_PICK_PHOTOS && res == RESULT_OK && data != null) { gotPhotos(data); return; }
         if (req == REQ_PICK_FOLDER && res == RESULT_OK && data != null && data.getData() != null) {
             Uri tree = data.getData();
             try {

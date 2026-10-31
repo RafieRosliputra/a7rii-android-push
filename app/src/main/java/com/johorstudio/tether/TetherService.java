@@ -178,6 +178,46 @@ public class TetherService extends Service {
         changed();
     }
     public int clearQueue() { return queue.clear(); }
+    public java.util.List<String[]> uploadRows() { return queue.rows(); }
+
+    /**
+     * Manual upload: photos copied from the camera to the phone, picked by the photographer.
+     * Same path as tethered photos (WebP, then upload). Photos already sent are skipped.
+     */
+    public void addManual(final java.util.List<Uri> uris) {
+        new Thread(new Runnable() { @Override public void run() {
+            String eventId = prefs.getString("event_id", "");
+            if (eventId.isEmpty()) { log("Log masuk dengan kod photographer dulu"); return; }
+            java.util.List<Uri> ok = new java.util.ArrayList<>();
+            java.util.List<String> names = new java.util.ArrayList<>(), keys = new java.util.ArrayList<>();
+            for (Uri u : uris) {
+                String name = "photo.jpg"; long size = -1, mod = 0; String type = getContentResolver().getType(u);
+                android.database.Cursor c = null;
+                try {
+                    c = getContentResolver().query(u, null, null, null, null);
+                    if (c != null && c.moveToFirst()) {
+                        int i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME); if (i >= 0 && !c.isNull(i)) name = c.getString(i);
+                        i = c.getColumnIndex(android.provider.OpenableColumns.SIZE); if (i >= 0 && !c.isNull(i)) size = c.getLong(i);
+                        i = c.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED); if (i >= 0 && !c.isNull(i)) mod = c.getLong(i);
+                    }
+                } catch (Exception ignored) {
+                } finally { if (c != null) c.close(); }
+                boolean jpg = (type != null && type.equals("image/jpeg")) || name.toLowerCase(Locale.US).matches(".*\\.jpe?g$");
+                if (!jpg) { log(name + " bukan JPEG, tidak dihantar"); continue; }
+                ok.add(u); names.add(name); keys.add(UploadQueue.keyFor(getContentResolver(), u, name, size, mod));
+            }
+            java.util.Set<String> sent = new java.util.HashSet<>();
+            try { if (!keys.isEmpty()) sent = App.api(TetherService.this).sentKeys(keys); }
+            catch (Exception e) { log("Tak dapat semak server sekarang, semak semasa upload"); }
+            int added = 0, skipped = 0;
+            for (int i = 0; i < ok.size(); i++) {
+                if (sent.contains(keys.get(i))) { queue.markSent(names.get(i), keys.get(i)); skipped++; continue; }
+                if (queue.add(ok.get(i), names.get(i), eventId, prefs.getInt("quality", 50), keys.get(i))) added++; else skipped++;
+            }
+            log("Upload manual: " + added + " masuk giliran" + (skipped > 0 ? ", " + skipped + " sudah ada (dilangkau)" : ""));
+            changed();
+        }}).start();
+    }
     public void retryNow() { queue.kick(); }
 
     // ------------------------------------------------------------------ camera
