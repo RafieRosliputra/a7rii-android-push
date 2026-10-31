@@ -21,6 +21,8 @@ services:
       REQUIRE_STORAGE_MARKER: "1"
       PUBLIC_URL: https://live.johorstudio.com
       MAIL_API: http://192.168.0.100:8140
+      # Google Cloud project invoicejohorstudiocomlogin, OAuth client "livephoto" (public, not a secret)
+      GOOGLE_CLIENT_ID: 147575767607-uhgoltbdmrhe3slfqdvvhuf0adn971uc.apps.googleusercontent.com
     ports:
       - "8095:8095"   # Cloudflare tunnel m10: live.johorstudio.com -> http://192.168.0.100:8095
     volumes:
