@@ -53,6 +53,18 @@ CONTACT_URL=https://johorstudio.com/#contact
 EOF
   echo "created $ENV  <- fill in GOOGLE_CLIENT_ID and MAIL_API_KEY"
 else echo "$ENV exists (kept)"; fi
+# Values handed over by deploy/install.sh (file deleted after use)
+SECRETS="${SECRETS_FILE:-}"
+if [ -n "$SECRETS" ] && [ -f "$SECRETS" ]; then
+  while IFS='=' read -r k v; do
+    [ -n "$k" ] && [ -n "$v" ] || continue
+    if grep -q "^$k=" "$ENV"; then sed -i "s|^$k=.*|$k=$v|" "$ENV"; else echo "$k=$v" >> "$ENV"; fi
+    echo "set $k"
+  done < "$SECRETS"
+  rm -f "$SECRETS"
+fi
+grep -q '^GOOGLE_CLIENT_ID=.\+' "$ENV" || echo "NOTE: GOOGLE_CLIENT_ID still empty (email code login still works)"
+grep -q '^MAIL_API_KEY=.\+' "$ENV" || echo "NOTE: MAIL_API_KEY still empty -> login codes cannot be emailed yet"
 chown 568:568 "$ENV"; chmod 600 "$ENV"
 
 say "NFS mount $TNAS_HOST:$TNAS_PATH -> $MNT"
