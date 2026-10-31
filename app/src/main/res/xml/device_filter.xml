@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Any PTP / still-image camera -->
+    <usb-device class="6" subclass="1" protocol="1" />
+    <!-- Sony (0x054C) -->
+    <usb-device vendor-id="1356" />
+</resources>
