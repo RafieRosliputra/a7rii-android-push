@@ -1,6 +1,6 @@
 # JS Live Photo (v3): pelan reka bentuk
 
-> Status: **REKA BENTUK SAHAJA, tiada kod lagi.** Dokumen ini merekod arahan Rafi (31 Okt 2026) dan cara Claude berfikir tentang seni bina.
+> Status: **Kod v3 siap di branch `v3` (31 Okt 2026)**, lihat `docs/HANDOFF.md`. Nota: server akhirnya tanpa Fastify/sharp (Node 24 `node:http` + `node:sqlite`, thumbnail dijana klien). Dokumen ini merekod arahan Rafi (31 Okt 2026) dan cara Claude berfikir tentang seni bina.
 > Mockup visual: kanvas "Live Photo v3 — Mockup" (landing page, admin, app user ×2, galeri client, upload client).
 >
 > Nota nama: branch `main` sekarang ialah **v2.0** (upload SMB terus ke TrueNAS). Reka bentuk baru ini dipanggil **v3 / JS Live Photo** supaya tak keliru. Nama boleh ditukar.
