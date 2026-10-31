@@ -1,0 +1,40 @@
+# TrueNAS custom app "livephoto" on m10 (live.johorstudio.com)
+# Code:   /mnt/ssd/livephoto/app      (git clone of this repo, read-only in the container)
+# Data:   /mnt/ssd/livephoto/data     (SQLite DB, thumbnails, upload parts' thumbs)
+# Photos: /mnt/tnas-livephoto         (NFS from tnas:/mnt/ssd/client-1month/livephoto over Tailscale)
+# Secrets (Google client ID, mail API key) live in /mnt/ssd/livephoto/livephoto.env, never in git.
+services:
+  livephoto:
+    image: node:24-alpine
+    container_name: livephoto
+    user: "568:568"
+    working_dir: /app/server
+    command: node src/server.js
+    env_file:
+      - /mnt/ssd/livephoto/livephoto.env
+    environment:
+      TZ: Asia/Kuala_Lumpur
+      NODE_ENV: production
+      PORT: "8095"
+      DATA_DIR: /data
+      PHOTOS_DIR: /photos
+      REQUIRE_STORAGE_MARKER: "1"
+      PUBLIC_URL: https://live.johorstudio.com
+      MAIL_API: http://192.168.0.100:8140
+    ports:
+      - "8095:8095"   # Cloudflare tunnel m10: live.johorstudio.com -> http://192.168.0.100:8095
+    volumes:
+      - /mnt/ssd/livephoto/app:/app:ro
+      - /mnt/ssd/livephoto/data:/data
+      # rslave: if the NFS mount comes back after the app started, the container sees it
+      - type: bind
+        source: /mnt/tnas-livephoto
+        target: /photos
+        bind:
+          propagation: rslave
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8095/auth/config"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
