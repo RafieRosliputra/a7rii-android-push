@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#20272b">
+<title>Log in · JohorStudio.com Live</title>
+<link rel="icon" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/site.css">
+<style>
+  body { min-height: 100vh; display: flex; flex-direction: column; }
+  .box { width: 100%; max-width: 400px; margin: 40px auto; padding: 26px; display: flex; flex-direction: column; gap: 16px; }
+  .box h1 { margin: 0; font-size: 24px; font-stretch: 85%; }
+  .or { display: flex; align-items: center; gap: 10px; color: var(--steel); font-size: 13px; }
+  .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  #gbtn { min-height: 44px; display: flex; justify-content: center; }
+  .code-input { font-size: 26px; letter-spacing: .4em; text-align: center; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<header class="topbar"><div class="wrap"><a class="brand" href="/"><span class="brand-name">JohorStudio.com</span><span class="live-badge">LIVE</span></a></div></header>
+<div class="wrap" style="flex:1">
+  <div class="card box">
+    <div>
+      <h1>Log in</h1>
+      <p class="muted small" style="margin:6px 0 0" id="sub">For JohorStudio.com photographers and event hosts.</p>
+    </div>
+
+    <div id="already" class="hidden" style="display:flex;flex-direction:column;gap:10px">
+      <p style="margin:0">You are logged in as <b id="meEmail"></b>.</p>
+      <button class="btn" id="continueBtn">Continue</button>
+      <button class="btn ghost" id="switchBtn">Use another account</button>
+    </div>
+
+    <div id="forms">
+      <div id="gwrap" class="hidden" style="display:flex;flex-direction:column;gap:14px">
+        <div id="gbtn"></div>
+        <div class="or">or</div>
+      </div>
+      <form id="emailForm" style="display:flex;flex-direction:column;gap:12px">
+        <div class="field">
+          <label for="email">Email</label>
+          <input class="input" id="email" type="email" autocomplete="email" inputmode="email" required placeholder="you@example.com">
+        </div>
+        <button class="btn" type="submit">Email me a 6-digit code</button>
+      </form>
+      <form id="codeForm" class="hidden" style="display:flex;flex-direction:column;gap:12px">
+        <p class="small" style="margin:0">We sent a code to <b id="codeTo"></b>. It is valid for 10 minutes.</p>
+        <div class="field">
+          <label for="code">Code</label>
+          <input class="input code-input" id="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required>
+        </div>
+        <button class="btn" type="submit">Log in</button>
+        <button class="btn ghost" type="button" id="backBtn">Use a different email</button>
+      </form>
+      <p class="error" id="err" role="alert"></p>
+      <p class="small muted" style="margin:0">Only emails added by the admin can log in. You stay logged in for 30 days.</p>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { $, api } from '/js/common.js';
+const params = new URLSearchParams(location.search);
+const forApp = params.get('app') === '1';
+const next = /^\/[a-z0-9/_-]*$/i.test(params.get('next') || '') ? params.get('next') : '/admin';
+if (forApp) $('#sub').textContent = 'Log in to connect the JS Tether app.';
+
+const err = (m) => { $('#err').textContent = m || ''; };
+
+async function finish(data) {
+  if (forApp) {
+    const tok = data.appToken || (await api('POST', '/auth/app-token', { device: 'android' })).appToken;
+    location.href = `jstether://auth?token=${encodeURIComponent(tok)}`;
+    $('#forms').innerHTML = '<p>Returning to the app… If nothing happens, open JS Tether again.</p>';
+    return;
+  }
+  location.href = next;
+}
+
+// Already logged in on this browser?
+try {
+  const me = await api('GET', '/api/me');
+  $('#meEmail').textContent = me.user.email;
+  $('#already').classList.remove('hidden');
+  $('#forms').classList.add('hidden');
+  $('#continueBtn').onclick = () => finish({}).catch((e) => err(e.message));
+  $('#switchBtn').onclick = async () => { await api('POST', '/auth/logout'); location.reload(); };
+} catch { /* not logged in */ }
+
+// Google Sign-In (only when a client ID is configured)
+const cfg = await api('GET', '/auth/config');
+if (cfg.googleClientId) {
+  $('#gwrap').classList.remove('hidden');
+  const s = document.createElement('script');
+  s.src = 'https://accounts.google.com/gsi/client'; s.async = true;
+  s.onload = () => {
+    google.accounts.id.initialize({
+      client_id: cfg.googleClientId,
+      callback: async ({ credential }) => {
+        err();
+        try { await finish(await api('POST', '/auth/google', { credential, app: forApp, device: 'android' })); }
+        catch (e) { err(e.message); }
+      },
+    });
+    google.accounts.id.renderButton($('#gbtn'), { theme: 'outline', size: 'large', text: 'continue_with', width: 300 });
+  };
+  document.head.appendChild(s);
+}
+
+let email = '';
+$('#emailForm').onsubmit = async (e) => {
+  e.preventDefault(); err();
+  email = $('#email').value.trim();
+  const b = e.submitter; b.disabled = true;
+  try {
+    await api('POST', '/auth/code/request', { email });
+    $('#codeTo').textContent = email;
+    $('#emailForm').classList.add('hidden'); $('#gwrap').classList.add('hidden');
+    $('#codeForm').classList.remove('hidden');
+    $('#code').focus();
+  } catch (e2) { err(e2.message); }
+  b.disabled = false;
+};
+$('#codeForm').onsubmit = async (e) => {
+  e.preventDefault(); err();
+  const b = e.submitter; b.disabled = true;
+  try { await finish(await api('POST', '/auth/code/verify', { email, code: $('#code').value, app: forApp, device: 'android' })); }
+  catch (e2) { err(e2.message); b.disabled = false; }
+};
+$('#backBtn').onclick = () => { $('#codeForm').classList.add('hidden'); $('#emailForm').classList.remove('hidden'); if (cfg.googleClientId) $('#gwrap').classList.remove('hidden'); err(); };
+</script>
+</body>
+</html>

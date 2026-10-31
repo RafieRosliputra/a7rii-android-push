@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#20272b">
+<title>Events · JohorStudio.com Live</title>
+<link rel="icon" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/site.css">
+<style>
+  .subnav { background: #fff; border-bottom: 1px solid var(--mist); }
+  .subnav .wrap { display: flex; gap: 4px; overflow-x: auto; }
+  .subnav button { border: 0; background: none; padding: 14px 14px 12px; font-weight: 600; color: var(--steel); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .subnav button[aria-selected="true"] { color: var(--ink); border-color: var(--teal); }
+  .banner { background: #fbe4e2; color: #8a2a24; padding: 10px 16px; font-size: 14px; font-weight: 600; }
+  .layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 20px; padding: 20px 16px 48px; }
+  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } .layout.detail-open .elist { display: none; } }
+  @media (min-width: 861px) { .back { display: none !important; } }
+  .elist { display: flex; flex-direction: column; gap: 10px; }
+  .elist-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .eitem { text-align: left; width: 100%; padding: 12px 14px; border: 1px solid var(--mist); background: #fff; border-radius: 10px; cursor: pointer; display: flex; flex-direction: column; gap: 2px; color: var(--ink); }
+  .eitem:hover { border-color: var(--line); }
+  .eitem[aria-current="true"] { border-color: var(--teal); box-shadow: 0 0 0 1px var(--teal); }
+  .eitem .t { font-weight: 600; overflow-wrap: anywhere; }
+  .eitem .m { font-size: 13px; color: var(--steel); }
+  .detail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .dhead { padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+  .dhead h2 { margin: 0; font-size: 24px; font-stretch: 85%; overflow-wrap: anywhere; }
+  .linkrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .linkbox { flex: 1 1 220px; min-width: 0; font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: var(--paper); border: 1px solid var(--mist); border-radius: 8px; padding: 9px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stats { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 14px; color: var(--steel); }
+  .stats b { color: var(--ink); font-size: 20px; margin-right: 4px; }
+  .section { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .section h3 { margin: 0; font-size: 17px; }
+  .prow { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; padding: 10px 0; border-top: 1px solid var(--mist); }
+  .prow:first-of-type { border-top: 0; }
+  .addrow { display: flex; flex-wrap: wrap; gap: 8px; }
+  .addrow .input { flex: 1 1 200px; width: auto; }
+  .urow { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; padding: 12px 0; border-top: 1px solid var(--mist); }
+  .photos-head { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; }
+  .empty-state { padding: 40px 16px; text-align: center; color: var(--steel); }
+  .usermenu { display: flex; align-items: center; gap: 12px; font-size: 14px; color: var(--mist); }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="/"><span class="brand-name">JohorStudio.com</span><span class="live-badge">LIVE</span></a>
+    <div class="usermenu"><span id="me"></span><button class="btn small light" id="logoutBtn">Log out</button></div>
+  </div>
+</header>
+<div class="banner hidden" id="offline">Storage is offline (the photo server can't reach tnas). Uploads are paused; the app keeps photos on the phone and retries.</div>
+<nav class="subnav"><div class="wrap" role="tablist">
+  <button role="tab" aria-selected="true" data-tab="events">EVENTS</button>
+  <button role="tab" aria-selected="false" data-tab="users" class="hidden" id="usersTab">Users</button>
+</div></nav>
+
+<div class="wrap">
+  <div id="eventsView" class="layout">
+    <aside class="elist">
+      <div class="elist-head"><h1 style="margin:0;font-size:20px">EVENTS</h1><button class="btn small" id="newBtn">+ New event</button></div>
+      <p class="small muted" style="margin:0" id="scopeNote"></p>
+      <div id="elist" style="display:flex;flex-direction:column;gap:8px"></div>
+    </aside>
+    <section class="detail" id="detail">
+      <div class="card empty-state">Choose an event, or create a new one.</div>
+    </section>
+  </div>
+
+  <div id="usersView" class="hidden" style="padding:20px 0 48px;max-width:760px">
+    <div class="card section">
+      <h3>Users</h3>
+      <p class="small muted" style="margin:0">Only emails listed here can log in, with Google (same email) or a 6-digit code sent by email. Removing a user keeps their folders; adding the same email again brings their events back.</p>
+      <form class="addrow" id="addUser">
+        <input class="input" type="email" name="email" placeholder="Email" required>
+        <input class="input" name="name" placeholder="Name (optional)" style="flex:1 1 140px">
+        <select class="input" name="role" style="flex:0 0 110px"><option value="user">User</option><option value="admin">Admin</option></select>
+        <button class="btn">Add</button>
+      </form>
+      <div id="ulist"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { $, $$, api, esc, toast, modal, fmtDate, todayYmd, ago, copyText, qrDataUrl, icon } from '/js/common.js';
+import { PhotoGrid, openLightbox, liveFeed } from '/js/grid.js';
+
+let me, events = [], current = null, grid = null, feed = null;
+
+let meRes;
+try { meRes = await api('GET', '/api/me'); }
+catch { location.href = '/login?next=/admin'; throw new Error('login'); }
+me = meRes.user;
+$('#offline').classList.toggle('hidden', meRes.storageOnline);
+$('#me').textContent = `${me.email} · ${me.role === 'admin' ? 'Admin' : 'User'}`;
+$('#scopeNote').textContent = me.role === 'admin' ? 'Admins see every event.' : 'Events you created or were assigned to.';
+if (me.role === 'admin') $('#usersTab').classList.remove('hidden');
+$('#logoutBtn').onclick = async () => { await api('POST', '/auth/logout'); location.href = '/'; };
+
+$$('[data-tab]').forEach((b) => b.onclick = () => {
+  $$('[data-tab]').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
+  $('#eventsView').classList.toggle('hidden', b.dataset.tab !== 'events');
+  $('#usersView').classList.toggle('hidden', b.dataset.tab !== 'users');
+  if (b.dataset.tab === 'users') loadUsers();
+});
+
+// ---------------- events ----------------
+async function loadEvents(selectId) {
+  ({ events } = await api('GET', '/api/events'));
+  $('#elist').innerHTML = events.length ? events.map((e) => `
+    <button class="eitem" data-id="${e.id}" aria-current="${current?.event.id === e.id}">
+      <span class="t">${esc(e.title)}</span>
+      <span class="m">${esc(fmtDate(e.date))} · ${e.photoCount} photo${e.photoCount === 1 ? '' : 's'}${me.role === 'admin' && e.owner ? ' · ' + esc(e.owner.name || e.owner.email) : ''}</span>
+    </button>`).join('') : '<p class="muted small">No events yet.</p>';
+  $$('.eitem').forEach((b) => b.onclick = () => openEvent(b.dataset.id));
+  const want = selectId || (location.hash.slice(1) && events.some((e) => e.id === location.hash.slice(1)) ? location.hash.slice(1) : null);
+  if (want) openEvent(want);
+}
+
+async function openEvent(id) {
+  feed?.stop();
+  current = await api('GET', `/api/events/${id}`);
+  history.replaceState(null, '', `#${id}`);
+  $$('.eitem').forEach((b) => b.setAttribute('aria-current', String(b.dataset.id === id)));
+  $('#eventsView').classList.add('detail-open');
+  renderDetail();
+}
+
+function renderDetail() {
+  const { event: e, members, viewers } = current;
+  const admin = me.role === 'admin';
+  $('#detail').innerHTML = `
+    <button class="btn ghost small back" style="align-self:flex-start" id="backBtn">← All events</button>
+    <div class="card dhead">
+      <div>
+        <div class="small muted">EVENTS / ${esc(e.folder)}</div>
+        <h2>${esc(e.title)}</h2>
+        <div class="small muted">${esc(fmtDate(e.date))}${e.owner ? ' · created by ' + esc(e.owner.name || e.owner.email) : ''}</div>
+      </div>
+      <div class="linkrow">
+        <div class="linkbox" title="${esc(e.url)}">${esc(e.url.replace(/^https?:\/\//, ''))}</div>
+        <button class="btn small ghost" id="copyBtn">Copy</button>
+        <a class="btn small ghost" href="/e/${esc(e.token)}" target="_blank" rel="noopener">Open</a>
+        <button class="btn small" id="qrBtn">${icon.qr}QR code</button>
+      </div>
+      <div class="stats">
+        <span><b>${e.photoCount}</b>photos</span><span><b>${e.guestCount}</b>from guests</span><span><b>${viewers}</b>watching now</span>
+      </div>
+      ${e.canManage ? `
+      <label class="check"><input type="checkbox" id="guestToggle" ${e.publicUpload ? 'checked' : ''}><span>Allow guest uploads <span class="muted small">(saved to the "public upload" folder)</span></span></label>
+      ${admin ? `<label class="check"><input type="checkbox" id="sampleToggle" ${e.showcase ? 'checked' : ''}><span>Feature as the sample event on the landing page</span></label>` : ''}` : ''}
+    </div>
+
+    <div class="card section">
+      <h3>Photographers</h3>
+      <div>${members.map((m) => `
+        <div class="prow">
+          <div><b>Photographer ${m.slot}</b> · ${esc(m.name || m.email)} <span class="muted small">${m.name ? esc(m.email) : ''}${m.status === 'removed' ? ' · removed user' : ''}</span>${m.userId === me.id ? ' <span class="pill teal">you</span>' : ''}</div>
+          ${e.canManage ? `<button class="btn small ghost" data-unassign="${m.userId}">Remove</button>` : ''}
+        </div>`).join('') || '<p class="muted small" style="margin:0">No photographers yet.</p>'}
+        <div class="prow"><div><b>public upload</b> · <span class="muted">guests on the web</span></div><span class="pill ${e.publicUpload ? 'teal' : ''}">${e.publicUpload ? 'open' : 'closed'}</span></div>
+      </div>
+      ${e.canManage ? `
+      <form class="addrow" id="addMember">
+        <input class="input" type="email" name="email" placeholder="User email" required list="userEmails">
+        <input class="input" type="number" name="slot" min="1" placeholder="Photographer no. (next: ${nextSlot(members)})" style="flex:0 1 220px">
+        <button class="btn">Add photographer</button>
+      </form><datalist id="userEmails"></datalist>` : ''}
+    </div>
+
+    <div class="card section">
+      <div class="photos-head"><h3>Photos</h3><span class="small muted" id="thumbNote"></span>
+        ${e.canManage ? '<button class="btn small ghost" id="rescanBtn">Check folder for new files</button>' : ''}</div>
+      <div id="grid" class="jgrid"></div>
+      <div id="gridEmpty" class="empty-state hidden">No photos yet. Photos from the app or added to the folder over SMB show up here.</div>
+      <button class="btn ghost hidden" id="moreBtn" style="align-self:center">Load more</button>
+    </div>
+
+    ${e.canManage ? `
+    <div class="card section">
+      <h3>Danger zone</h3>
+      <div class="linkrow">
+        <button class="btn small ghost" id="newLinkBtn">Change link</button><span class="small muted">The old link and QR stop working.</span>
+      </div>
+      <div class="linkrow">
+        <button class="btn small danger" id="deleteBtn">Delete event</button><span class="small muted">Deletes the folder and every photo in it. This cannot be undone.</span>
+      </div>
+    </div>` : ''}`;
+
+  $('#backBtn').onclick = () => { $('#eventsView').classList.remove('detail-open'); history.replaceState(null, '', '#'); };
+  $('#copyBtn').onclick = () => copyText(e.url);
+  $('#qrBtn').onclick = () => showQr(e);
+  $('#guestToggle') && ($('#guestToggle').onchange = (x) => patch({ publicUpload: x.target.checked }));
+  $('#sampleToggle') && ($('#sampleToggle').onchange = (x) => patch({ showcase: x.target.checked }));
+  $('#newLinkBtn') && ($('#newLinkBtn').onclick = async () => { if (confirm('Make a new link? The old link and QR code will stop working.')) { await patch({ newLink: true }); toast('New link ready'); } });
+  $('#deleteBtn') && ($('#deleteBtn').onclick = () => confirmDelete(e));
+  $('#rescanBtn') && ($('#rescanBtn').onclick = async () => { const r = await api('POST', `/api/events/${e.id}/rescan`); toast(`${r.added} new file${r.added === 1 ? '' : 's'} found`); loadPhotos(); });
+  $$('[data-unassign]').forEach((b) => b.onclick = async () => {
+    await api('DELETE', `/api/events/${e.id}/members/${b.dataset.unassign}`);
+    openEvent(e.id);
+  });
+  const form = $('#addMember');
+  if (form) {
+    if (admin) api('GET', '/api/admin/users').then(({ users }) => { $('#userEmails').innerHTML = users.filter((u) => u.status === 'active').map((u) => `<option value="${esc(u.email)}">`).join(''); });
+    form.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const fd = new FormData(form);
+      try { await api('POST', `/api/events/${e.id}/members`, { email: fd.get('email'), slot: fd.get('slot') || null }); openEvent(e.id); }
+      catch (err) { toast(err.message, 4000); }
+    };
+  }
+  loadPhotos();
+}
+const nextSlot = (members) => { const s = new Set(members.map((m) => m.slot)); let n = 1; while (s.has(n)) n++; return n; };
+
+async function patch(body) {
+  try {
+    const { event } = await api('PATCH', `/api/events/${current.event.id}`, body);
+    current.event = { ...current.event, ...event };
+    renderDetail(); loadEvents();
+  } catch (e) { toast(e.message, 4000); renderDetail(); }
+}
+
+async function showQr(e) {
+  const src = await qrDataUrl(e.url, 8);
+  modal(`<h2>${esc(e.title)}</h2><img src="${src}" alt="QR code for the gallery" style="width:100%;max-width:320px;align-self:center;image-rendering:pixelated">
+    <div class="linkbox">${esc(e.url)}</div>
+    <div class="linkrow"><a class="btn" download="QR ${esc(e.folder)}.png" href="${src}">${icon.dl}Download QR</a><button class="btn ghost" data-close>Close</button></div>`);
+}
+
+function confirmDelete(e) {
+  const m = modal(`<h2>Delete event?</h2>
+    <p style="margin:0">This deletes the folder <b>${esc(e.folder)}</b> and all ${e.photoCount} photos on the server. There is no recycle bin.</p>
+    <div class="field"><label for="cf">Type the event name to confirm</label><input class="input" id="cf" autocomplete="off" placeholder="${esc(e.folder)}"></div>
+    <p class="error" id="cfErr"></p>
+    <div class="linkrow"><button class="btn danger" id="cfGo" disabled>Delete for good</button><button class="btn ghost" data-close>Cancel</button></div>`);
+  const inp = $('#cf', m.el);
+  inp.oninput = () => { $('#cfGo', m.el).disabled = inp.value.trim() !== e.folder; };
+  $('#cfGo', m.el).onclick = async () => {
+    try { await api('DELETE', `/api/events/${e.id}`, { confirm: inp.value.trim() }); m.close(); current = null; feed?.stop();
+      $('#detail').innerHTML = '<div class="card empty-state">Event deleted.</div>'; $('#eventsView').classList.remove('detail-open'); loadEvents(); }
+    catch (err) { $('#cfErr', m.el).textContent = err.message; }
+  };
+}
+
+// ---------------- photos ----------------
+const imgUrl = (p, size) => `/api/photos/${p.id}/img/${size >= 1600 ? 1600 : 480}`;
+async function loadPhotos() {
+  const e = current.event;
+  grid = new PhotoGrid($('#grid'), {
+    urlFor: imgUrl,
+    onTile: (p, list) => {
+      const lb = openLightbox(list, p, {
+        urlFor: imgUrl, downloadUrl: (x) => `/api/photos/${x.id}/img/orig?dl=1`,
+        actions: (x) => e.canManage ? `<button class="btn small light" data-hide="${x.id}">${x.hidden ? 'Show' : 'Hide'}</button><button class="btn small danger" data-del="${x.id}">Delete</button>` : '',
+      });
+      document.querySelector('.lightbox').addEventListener('click', async (ev) => {
+        const h = ev.target.closest('[data-hide]'), d = ev.target.closest('[data-del]');
+        if (h) { const x = lb.current(); const { photo } = await api('PATCH', `/api/photos/${x.id}`, { hidden: !x.hidden }); Object.assign(x, photo); grid.update(photo); lb.refresh(); toast(photo.hidden ? 'Hidden from the gallery' : 'Shown in the gallery'); }
+        if (d) { const x = lb.current(); if (!confirm('Delete this photo for good?')) return; await api('DELETE', `/api/photos/${x.id}`); grid.remove(x.id); lb.close(); toast('Deleted'); }
+      });
+    },
+  });
+  const { photos } = await api('GET', `/api/events/${e.id}/photos`);
+  grid.set(photos);
+  $('#gridEmpty').classList.toggle('hidden', photos.length > 0);
+  $('#moreBtn').classList.toggle('hidden', photos.length < 120);
+  $('#moreBtn').onclick = async () => {
+    const more = (await api('GET', `/api/events/${e.id}/photos?before=${grid.minSeq()}`)).photos;
+    grid.append(more); if (more.length < 120) $('#moreBtn').classList.add('hidden');
+  };
+  feed?.stop();
+  feed = liveFeed({
+    streamUrl: `/api/e/${e.token}/stream`, pollUrl: `/api/events/${e.id}/photos`, getCursor: () => grid.maxSeq(),
+    onPhoto: (p) => { grid.addLive(p); $('#gridEmpty').classList.add('hidden'); },
+    onRemove: (id) => grid.remove(id),
+  });
+  if (e.canManage) makeMissingThumbs(e);
+}
+
+// Photos copied in over SMB have no thumbnails: this browser makes them (480 + 1600 px).
+let thumbJob = 0;
+async function makeMissingThumbs(e) {
+  const job = ++thumbJob;
+  const { photos } = await api('GET', `/api/events/${e.id}/missing-thumbs`);
+  if (!photos.length) return;
+  const { decode, thumbnail } = await import('/js/encode.js');
+  let done = 0;
+  for (const p of photos) {
+    if (job !== thumbJob) return;
+    $('#thumbNote') && ($('#thumbNote').textContent = `Making previews ${done + 1}/${photos.length}…`);
+    try {
+      const blob = await (await fetch(`/api/photos/${p.id}/img/orig`)).blob();
+      const src = await decode(blob);
+      const big = await thumbnail(src, 1600); const small = await thumbnail(big.canvas, 480);
+      src.close?.();
+      await api('PUT', `/api/photos/${p.id}/thumb/1600`, big.blob);
+      await api('PUT', `/api/photos/${p.id}/thumb/480`, small.blob);
+    } catch (err) { console.warn('thumb', p.id, err); }
+    done++;
+  }
+  if (job === thumbJob && $('#thumbNote')) $('#thumbNote').textContent = `${done} preview${done === 1 ? '' : 's'} made`;
+}
+
+$('#newBtn').onclick = () => {
+  const t = todayYmd();
+  const m = modal(`<h2>New event</h2>
+    <form id="nf" style="display:flex;flex-direction:column;gap:12px">
+      <div class="field"><label for="nd">Date</label><input class="input" id="nd" type="date" required value="${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6)}"></div>
+      <div class="field"><label for="nt">Event name</label><input class="input" id="nt" required maxlength="80" placeholder="Konvo Tadika Bandar Putra"></div>
+      <p class="small muted" style="margin:0" id="np"></p>
+      <p class="error" id="nerr"></p>
+      <div class="linkrow"><button class="btn">Create</button><button type="button" class="btn ghost" data-close>Cancel</button></div>
+    </form>`);
+  const prev = () => { $('#np', m.el).textContent = `Folder: EVENTS/${$('#nd', m.el).value.replace(/-/g, '')} ${$('#nt', m.el).value.trim()}`; };
+  $('#nd', m.el).oninput = prev; $('#nt', m.el).oninput = prev; prev();
+  $('#nt', m.el).focus();
+  $('#nf', m.el).onsubmit = async (ev) => {
+    ev.preventDefault();
+    try {
+      const { event } = await api('POST', '/api/events', { date: $('#nd', m.el).value.replace(/-/g, ''), title: $('#nt', m.el).value });
+      m.close(); await loadEvents(event.id); toast('Event created');
+    } catch (err) { $('#nerr', m.el).textContent = err.message; }
+  };
+};
+
+// ---------------- users ----------------
+async function loadUsers() {
+  const { users } = await api('GET', '/api/admin/users');
+  $('#ulist').innerHTML = users.map((u) => `
+    <div class="urow">
+      <div style="min-width:0;overflow-wrap:anywhere"><b>${esc(u.email)}</b>${u.name ? ` · ${esc(u.name)}` : ''}
+        <div class="small muted">${u.role === 'admin' ? 'Admin' : 'User'} · ${u.eventCount} event${u.eventCount === 1 ? '' : 's'}${u.lastLoginAt ? ' · last login ' + ago(u.lastLoginAt) : ' · never logged in'}</div></div>
+      ${u.status === 'removed'
+        ? `<span style="display:flex;gap:8px;align-items:center"><span class="pill red">Removed · folders kept</span><button class="btn small ghost" data-restore="${u.id}">Restore</button></span>`
+        : u.id === me.id ? '<span class="pill teal">You</span>' : `<button class="btn small ghost" data-remove="${u.id}">Remove access</button>`}
+    </div>`).join('');
+  $$('[data-remove]').forEach((b) => b.onclick = async () => {
+    if (!confirm('Remove access? Their events and folders stay.')) return;
+    try { await api('PATCH', `/api/admin/users/${b.dataset.remove}`, { status: 'removed' }); loadUsers(); } catch (e) { toast(e.message, 4000); }
+  });
+  $$('[data-restore]').forEach((b) => b.onclick = async () => { await api('PATCH', `/api/admin/users/${b.dataset.restore}`, { status: 'active' }); loadUsers(); });
+}
+$('#addUser').onsubmit = async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  try { await api('POST', '/api/admin/users', Object.fromEntries(f)); ev.target.reset(); loadUsers(); toast('User added'); }
+  catch (e) { toast(e.message, 4000); }
+};
+
+loadEvents();
+</script>
+</body>
+</html>

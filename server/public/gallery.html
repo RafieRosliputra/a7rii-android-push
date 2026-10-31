@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#20272b">
+<title>Event gallery · JohorStudio.com Live</title>
+<link rel="icon" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/site.css">
+<style>
+  body { background: #161c1f; color: #e8eeee; }
+  .ghead { position: sticky; top: 0; z-index: 10; background: rgba(32,39,43,.96); backdrop-filter: blur(8px); border-bottom: 1px solid #2c363a; }
+  .ghead .wrap { padding-top: 10px; padding-bottom: 10px; display: flex; flex-direction: column; gap: 10px; }
+  .grow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .gsub { font-size: 12px; letter-spacing: .12em; color: var(--teal-light); font-weight: 600; text-decoration: none; }
+  .gtitle { margin: 2px 0 0; font-size: 20px; font-stretch: 85%; line-height: 1.15; color: #fff; overflow-wrap: anywhere; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tab { border: 1px solid #3a464b; background: transparent; color: #c9d3d2; border-radius: 999px; padding: 5px 12px; font-size: 14px; cursor: pointer; }
+  .tab[aria-pressed="true"] { background: #e8eeee; color: var(--graphite); border-color: #e8eeee; }
+  .status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #9fb0b2; padding: 10px 0; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #66737a; }
+  .dot.live { background: #e0564e; animation: pulse 1.6s infinite; }
+  main.wrap { padding-left: 4px; padding-right: 4px; padding-bottom: 40px; }
+  @media (min-width: 700px) { main.wrap { padding-left: 16px; padding-right: 16px; } }
+  .empty { text-align: center; padding: 60px 16px; color: #9fb0b2; }
+  .gone { max-width: 420px; margin: 80px auto; text-align: center; padding: 0 16px; }
+  .ufile { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
+  .warn { background: #fff4e0; color: #7a4a00; border-radius: 8px; padding: 10px 12px; font-size: 14px; font-weight: 600; }
+  .gfoot { text-align: center; font-size: 13px; color: #7f8f92; padding: 24px 16px 40px; }
+  .gfoot a { color: #b9c6c7; }
+</style>
+</head>
+<body>
+<header class="ghead">
+  <div class="wrap">
+    <div class="grow">
+      <div style="min-width:0">
+        <a class="gsub" href="/">JOHORSTUDIO.COM · LIVE</a>
+        <h1 class="gtitle" id="title">Loading…</h1>
+      </div>
+      <button class="btn" id="uploadBtn" hidden></button>
+    </div>
+    <div class="tabs" role="group" aria-label="Filter">
+      <button class="tab" data-f="all" aria-pressed="true">All</button>
+      <button class="tab" data-f="photographer" aria-pressed="false">Photographers</button>
+      <button class="tab" data-f="public" aria-pressed="false">Guests</button>
+    </div>
+  </div>
+</header>
+<main class="wrap">
+  <div class="status"><span class="dot" id="dot"></span><span id="statusText">Connecting…</span></div>
+  <div id="grid" class="jgrid"></div>
+  <div id="empty" class="empty hidden">No photos yet. They will appear here the moment they are taken.</div>
+  <div id="more" class="empty hidden"><button class="btn ghost" style="color:#e8eeee" id="moreBtn">Load more</button></div>
+</main>
+<div id="gone" class="gone hidden">
+  <h1 style="font-size:22px">This gallery link is not available</h1>
+  <p class="muted">The link may have changed or the event was removed. Ask the event host for a new link.</p>
+  <p><a class="btn" href="/">JohorStudio.com Live</a></p>
+</div>
+<div class="gfoot">Live gallery by <a href="https://johorstudio.com">JohorStudio.com</a> · <a id="wa" href="https://wa.me/60127983745">WhatsApp us</a></div>
+<input type="file" id="picker" accept="image/*" multiple hidden>
+
+<script type="module">
+import { $, $$, esc, toast, modal, icon } from '/js/common.js';
+import { PhotoGrid, openLightbox, liveFeed } from '/js/grid.js';
+
+const token = location.pathname.split('/')[2];
+const base = `/p/${token}`;
+const urlFor = (p, size) => `${base}/${p.id}/${size >= 1600 ? 1600 : 480}`;
+let filter = 'all', total = 0, ended = false;
+
+const grid = new PhotoGrid($('#grid'), {
+  urlFor,
+  filter: (p) => filter === 'all' || p.src === filter || (filter === 'photographer' && p.src === 'other'),
+  onTile: (p, list) => openLightbox(list, p, { urlFor, downloadUrl: (x) => `${base}/${x.id}/orig?dl=1` }),
+});
+
+function setStatus(s) {
+  const dot = $('#dot');
+  dot.className = 'dot' + (s === 'live' || s === 'poll' ? ' live' : '');
+  const n = grid.photos.length;
+  const word = n === 1 ? 'photo' : 'photos';
+  $('#statusText').textContent = s === 'offline' ? `Offline · ${n} ${word} · reconnecting…`
+    : s === 'reconnecting' ? `Reconnecting… · ${n} ${word}` : `Live · ${n} ${word}`;
+  $('#empty').classList.toggle('hidden', n > 0);
+}
+let lastStatus = 'live';
+const status = (s) => { lastStatus = s || lastStatus; setStatus(lastStatus); };
+
+function gone() {
+  document.querySelector('header').classList.add('hidden');
+  document.querySelector('main').classList.add('hidden');
+  $('#gone').classList.remove('hidden');
+}
+
+async function load() {
+  const r = await fetch(`/api/e/${token}`);
+  if (r.status === 404) return gone();
+  const d = await r.json();
+  document.title = `${d.event.title} · JohorStudio.com Live`;
+  $('#title').textContent = d.event.title;
+  $('#wa').href = `https://wa.me/${d.whatsapp}`;
+  if (d.event.publicUpload) { const b = $('#uploadBtn'); b.hidden = false; b.innerHTML = `${icon.up}Upload`; }
+  grid.set(d.photos);
+  ended = d.photos.length < 120;
+  $('#more').classList.toggle('hidden', ended);
+  status('live');
+  liveFeed({
+    streamUrl: `/api/e/${token}/stream`, pollUrl: `/api/e/${token}/photos`, getCursor: () => grid.maxSeq(),
+    onPhoto: (p) => { grid.addLive(p); setTimeout(() => status(), 1100); },
+    onRemove: (id) => { grid.remove(id); status(); },
+    onGone: gone, onStatus: status,
+  });
+}
+
+$('#moreBtn').onclick = async () => {
+  const d = await (await fetch(`/api/e/${token}/photos?before=${grid.minSeq()}`)).json();
+  grid.append(d.photos);
+  if (d.photos.length < 120) $('#more').classList.add('hidden');
+  status();
+};
+$$('.tab').forEach((t) => t.onclick = () => {
+  filter = t.dataset.f;
+  $$('.tab').forEach((x) => x.setAttribute('aria-pressed', String(x === t)));
+  grid.render();
+});
+
+// ---- guest upload: WebP made on the phone, full resolution, one photo at a time ----
+let busy = false;
+const leaveWarning = (e) => { if (busy) { e.preventDefault(); e.returnValue = ''; } };
+window.addEventListener('beforeunload', leaveWarning);
+$('#uploadBtn').onclick = () => { if (!busy) $('#picker').click(); };
+$('#picker').onchange = async (e) => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  if (!files.length) return;
+  busy = true;
+  const m = modal(`<h2>Uploading ${files.length} photo${files.length > 1 ? 's' : ''}</h2>
+    <div class="warn">Please don't close this page or lock your phone until it's done.</div>
+    <div class="ufile"><span id="uName"></span><span id="uCount"></span></div>
+    <div class="progress"><div id="uBar"></div></div>
+    <div class="small muted" id="uStep">Preparing…</div>
+    <div class="error" id="uErr"></div>
+    <button class="btn hidden" id="uDone" data-close>Done</button>`);
+  const { preparePhoto } = await import('/js/encode.js');
+  const { uploadPhoto } = await import('/js/upload.js');
+  let ok = 0; const failed = [];
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    const set = (frac, step) => {
+      $('#uBar', m.el).style.width = `${((i + frac) / files.length) * 100}%`;
+      if (step) $('#uStep', m.el).textContent = step;
+    };
+    $('#uName', m.el).textContent = f.name.length > 28 ? f.name.slice(0, 25) + '…' : f.name;
+    $('#uCount', m.el).textContent = `${i + 1} of ${files.length}`;
+    try {
+      set(0, 'Converting to WebP on your phone…');
+      const out = await preparePhoto(f, 0.5);
+      set(0.3, 'Uploading…');
+      await uploadPhoto({ startUrl: `/api/e/${token}/uploads`, startBody: { name: 'photo.webp' }, blob: out.blob,
+        thumbs: out.thumbs, onProgress: (x) => set(0.3 + x * 0.7) });
+      ok++;
+    } catch (err) {
+      failed.push(`${f.name}: ${err.message}`);
+      if (err.status === 403) break;
+    }
+  }
+  busy = false;
+  $('#uBar', m.el).style.width = '100%';
+  $('#uStep', m.el).textContent = ok ? `${ok} photo${ok > 1 ? 's' : ''} added to the gallery. Thank you!` : 'Nothing was uploaded.';
+  $('.warn', m.el).classList.add('hidden');
+  if (failed.length) $('#uErr', m.el).innerHTML = failed.map(esc).join('<br>');
+  $('#uDone', m.el).classList.remove('hidden');
+  if (ok) toast('Uploaded');
+};
+
+load().catch(() => { $('#statusText').textContent = 'Could not load the gallery. Pull down to retry.'; });
+</script>
+</body>
+</html>

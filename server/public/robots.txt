@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /$
+Disallow: /e/
+Disallow: /admin
+Disallow: /api/

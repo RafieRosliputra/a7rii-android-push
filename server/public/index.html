@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JohorStudio.com Live · Live event photo gallery</title>
+<meta name="description" content="Live event photography by JohorStudio.com. Photos reach your guests' phones seconds after they are taken. Guests scan a QR code, watch the gallery fill up live and add their own photos.">
+<meta name="theme-color" content="#20272b">
+<link rel="icon" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/site.css">
+<style>
+  .hero { background: var(--graphite); color: var(--paper); padding: 40px 0 64px; }
+  .hero .wrap { display: flex; flex-wrap: wrap; gap: 40px; align-items: center; }
+  .hero-text { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+  .kicker { font-size: 13px; letter-spacing: .14em; color: var(--teal-light); font-weight: 600; }
+  .hero h1 { margin: 0; font-stretch: 80%; font-size: clamp(36px, 6vw, 58px); line-height: 1.03; }
+  .hero p { margin: 0; font-size: 18px; color: #c9d3d2; max-width: 560px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; }
+  .mosaic { flex: 1 1 380px; min-width: 0; display: grid; grid-template-columns: 1.4fr .8fr 1.2fr; grid-template-rows: 140px 140px; gap: 6px; }
+  .mosaic div { background: #3b4a4f center / cover no-repeat; border-radius: 6px; }
+  .mosaic div:nth-child(2) { grid-row: span 2; background-color: #56686d; }
+  .mosaic div:nth-child(3) { background-color: #2f5f5a; }
+  .mosaic div:nth-child(4) { background-color: #4a5a5e; }
+  .mosaic div:nth-child(5) { background-color: #66737a; }
+  @media (max-width: 520px) { .mosaic { grid-template-rows: 100px 100px; } }
+  section.block { padding: 56px 0; }
+  section.block h2 { font-stretch: 85%; font-size: 30px; margin: 0 0 8px; }
+  .lead { color: var(--steel); margin: 0 0 28px; max-width: 640px; }
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .step { padding: 22px; display: flex; flex-direction: column; gap: 8px; }
+  .step .n { width: 32px; height: 32px; border-radius: 50%; background: var(--teal-soft); color: var(--teal-dark); font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .step h3 { margin: 4px 0 0; font-size: 18px; }
+  .step p { margin: 0; color: var(--steel); font-size: 15px; }
+  .feat { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 28px; padding: 0; margin: 0; list-style: none; }
+  .feat li { padding-left: 18px; position: relative; color: var(--ink); }
+  .feat li::before { content: ""; position: absolute; left: 0; top: 9px; width: 8px; height: 8px; border-radius: 2px; background: var(--teal); }
+  .sample { background: var(--graphite); color: var(--paper); }
+  .sample .lead { color: #b4c0c1; }
+  .contact { display: flex; flex-wrap: wrap; gap: 24px; justify-content: space-between; align-items: center; padding: 28px; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="/"><span class="brand-name">JohorStudio.com</span><span class="live-badge">LIVE</span></a>
+    <nav>
+      <a href="#how">How it works</a>
+      <a href="#sample" id="navSample" class="hidden">Sample event</a>
+      <a href="#contact">Contact</a>
+      <a class="btn small light" href="/admin" id="loginLink">Log in</a>
+    </nav>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap">
+    <div class="hero-text">
+      <div class="kicker">LIVE EVENT PHOTOGRAPHY</div>
+      <h1>Your event photos, on every guest's phone.</h1>
+      <p>Each time our photographer presses the shutter, the photo appears in your event gallery within seconds. Guests scan a QR code, watch the photos arrive live, and can add their own.</p>
+      <div class="cta">
+        <a class="btn wa" href="https://wa.me/60127983745?text=Hi%20Rafi" target="_blank" rel="noopener"><span class="wa-icon"></span>WhatsApp 012-798 3745</a>
+        <a class="btn light hidden" href="#sample" id="heroSample">See a sample event</a>
+      </div>
+    </div>
+    <div class="mosaic" id="mosaic" aria-hidden="true"><div></div><div></div><div></div><div></div><div></div></div>
+  </div>
+</section>
+
+<section class="block" id="how">
+  <div class="wrap">
+    <h2>How it works</h2>
+    <p class="lead">No app for your guests to install. One link, one QR code.</p>
+    <div class="steps">
+      <div class="card step"><span class="n">1</span><h3>We shoot</h3><p>Our camera sends every photo straight to your private event gallery during the event.</p></div>
+      <div class="card step"><span class="n">2</span><h3>Guests scan</h3><p>Put the QR code on tables, screens or the backdrop. The gallery opens in any phone browser.</p></div>
+      <div class="card step"><span class="n">3</span><h3>Everyone shares</h3><p>Guests watch new photos appear live, download their favourites and upload their own shots.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="block sample hidden" id="sample">
+  <div class="wrap">
+    <h2 id="sampleTitle">Sample event</h2>
+    <p class="lead" id="sampleLead">A selection of photos from a recent event.</p>
+    <div id="sampleGrid" class="jgrid"></div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="wrap">
+    <h2>Built for events</h2>
+    <p class="lead">Convocations, weddings, corporate dinners, launches and sports days, across Malaysia.</p>
+    <ul class="feat">
+      <li>Photos appear in seconds, not days</li>
+      <li>Private link per event, no public listing</li>
+      <li>Full-resolution downloads</li>
+      <li>Guests can upload from their phones</li>
+      <li>Several photographers in one gallery</li>
+      <li>Full photo set delivered after the event</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block" id="contact" style="padding-top:0">
+  <div class="wrap">
+    <div class="card contact">
+      <div>
+        <h2 style="margin:0 0 6px">Planning an event?</h2>
+        <p class="muted" style="margin:0">Tell us the date, venue and number of guests. We will reply with a quotation.</p>
+      </div>
+      <div class="cta">
+        <a class="btn wa" href="https://wa.me/60127983745?text=Hi%20Rafi" target="_blank" rel="noopener"><span class="wa-icon"></span>WhatsApp us</a>
+        <a class="btn ghost" id="contactLink" href="https://johorstudio.com/#contact">Contact form</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="site">
+  <div class="wrap" style="display:flex;flex-wrap:wrap;gap:8px 24px;justify-content:space-between">
+    <div>© <span id="yr"></span> PROMEDIA CREATIVE SOLUTIONS (JR0113470-V) · <a href="https://johorstudio.com">JohorStudio.com</a></div>
+    <div>3038-A, Jln Merbau Satu, Bandar Putra, 81000 Kulai, Johor</div>
+  </div>
+</footer>
+
+<script type="module">
+import { $, $$, icon, fmtDate } from '/js/common.js';
+import { PhotoGrid, openLightbox } from '/js/grid.js';
+
+$('#yr').textContent = new Date().getFullYear();
+$$('.wa-icon').forEach((s) => { s.outerHTML = icon.wa; });
+
+fetch('/auth/config').then((r) => r.json()).then((c) => {
+  $$('a.wa').forEach((a) => { a.href = `https://wa.me/${c.whatsapp}?text=Hi%20Rafi`; });
+  $('#contactLink').href = c.contactUrl;
+}).catch(() => {});
+fetch('/api/me').then((r) => { if (r.ok) $('#loginLink').textContent = 'My events'; }).catch(() => {});
+
+// Sample section only appears when the admin has featured an event.
+fetch('/api/showcase').then((r) => r.json()).then(({ event, photos }) => {
+  if (!event || !photos.length) return;
+  const urlFor = (p, s) => `/s/${p.id}/${s >= 1600 ? 1600 : 480}`;
+  $('#sample').classList.remove('hidden');
+  $('#navSample').classList.remove('hidden');
+  $('#heroSample').classList.remove('hidden');
+  $('#sampleTitle').textContent = event.title;
+  $('#sampleLead').textContent = [fmtDate(event.date), 'A random selection from the live gallery.'].filter(Boolean).join(' · ');
+  new PhotoGrid($('#sampleGrid'), { urlFor, onTile: (p, list) => openLightbox(list, p, { urlFor, downloadUrl: (x) => urlFor(x, 1600) }) }).set(photos);
+  const tall = photos.find((p) => p.h > p.w), rest = photos.filter((p) => p !== tall);
+  const pick = [rest[0], tall || rest[1], rest[1 + (tall ? 0 : 1)], rest[2 + (tall ? 0 : 1)], rest[3 + (tall ? 0 : 1)]];
+  $$('#mosaic div').forEach((d, i) => { if (pick[i]) d.style.backgroundImage = `url("${urlFor(pick[i], 480)}")`; });
+}).catch(() => {});
+</script>
+</body>
+</html>
