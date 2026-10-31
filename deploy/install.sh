@@ -29,8 +29,8 @@ say "3/5 tnas: dataset livephoto + NFS share untuk m10 ($M10_TS_IP)"
 scp -q "${SSHO[@]}" deploy/setup-tnas.sh "$TNAS:/tmp/setup-tnas.sh"
 ssh -t "${SSHO[@]}" "$TNAS" "sudo bash /tmp/setup-tnas.sh $M10_TS_IP; rm -f /tmp/setup-tnas.sh"
 
-say "4/5 Rahsia untuk m10 (tekan Enter untuk langkau, boleh isi kemudian)"
-read -rp "Google OAuth Client ID (...apps.googleusercontent.com): " GCID
+say "4/5 API key JohorStudio Mail (tekan Enter untuk langkau, boleh isi kemudian)"
+GCID=""  # Google Client ID is set in deploy/compose.yaml
 read -rsp "JohorStudio Mail API key (app livephoto, tak dipapar): " MKEY; echo
 GH=""
 command -v gh >/dev/null && GH=$(gh auth token 2>/dev/null || true)
