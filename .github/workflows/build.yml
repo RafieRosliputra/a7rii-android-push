@@ -11,6 +11,9 @@ on:
       - '.github/workflows/build.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write   # publish the GitHub Release
+
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -43,12 +46,14 @@ jobs:
           ls "$ANDROID_HOME/build-tools"
 
       - name: Signing key
+        id: key
         env:
           KS_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
         run: |
           if [ -n "$KS_B64" ]; then
             echo "$KS_B64" | base64 -d > release.keystore
             echo "Using release.keystore from secrets"
+            echo "release=1" >> "$GITHUB_OUTPUT"
           else
             keytool -genkeypair -keystore release.keystore -storepass jstether -keypass jstether -alias jstether \
               -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=JohorStudio CI, O=JohorStudio, C=MY" > /dev/null 2>&1
@@ -62,3 +67,20 @@ jobs:
         with:
           name: JSTether-apk
           path: build/JSTether-v*.apk
+
+      # With the real key: publish/refresh the GitHub Release "JS Tether v<version>" (tag jstether-v<version>).
+      - name: GitHub Release
+        if: steps.key.outputs.release == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK=$(ls build/JSTether-v*.apk)
+          VER=$(basename "$APK" .apk | sed 's/JSTether-v//')
+          TAG="jstether-v$VER"
+          NOTES="JS Tether $VER for JS Live Photo (live.johorstudio.com). Built from ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Install over the existing app."
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --clobber
+            gh release edit "$TAG" --notes "$NOTES"
+          else
+            gh release create "$TAG" "$APK" --target "$GITHUB_SHA" --title "JS Tether $VER" --notes "$NOTES" --prerelease
+          fi
