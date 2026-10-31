@@ -38,6 +38,23 @@
   .feat li::before { content: ""; position: absolute; left: 0; top: 9px; width: 8px; height: 8px; border-radius: 2px; background: var(--teal); }
   .sample { background: var(--graphite); color: var(--paper); }
   .sample .lead { color: #b4c0c1; }
+  .livestrip { background: #2a1513; border-bottom: 1px solid #4a2320; }
+  .livestrip .wrap { display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: center; justify-content: space-between; padding-top: 16px; padding-bottom: 16px; }
+  .ls-text { color: #f1d6d3; font-size: 15px; }
+  .ls-btns { display: flex; flex-wrap: wrap; gap: 12px; }
+  .foot-links { font-size: 13px; }
+  .foot-links a, .foot-links .linkbtn { color: #aab6b8; }
+  .code-box { position: relative; gap: 12px; text-align: center; max-width: 420px; }
+  .code-box h2 { font-size: 24px; font-stretch: 85%; }
+  .cm-kicker { font-size: 12px; letter-spacing: .14em; color: var(--tally); font-weight: 700; display: flex; justify-content: center; align-items: center; gap: 6px; }
+  .cm-kicker::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--tally); }
+  .cm-sub { margin: 0; color: var(--steel); }
+  .cm-go { width: 100%; padding: 14px; font-size: 16px; }
+  .cm-close { position: absolute; right: 10px; top: 8px; border: 0; background: none; font-size: 26px; line-height: 1; color: var(--steel); cursor: pointer; padding: 6px; }
+  .cm-alt { font-size: 13px; }
+  .code-box .field { text-align: left; }
+  .code-box details { text-align: left; }
+  .cm-back { background: var(--teal-soft); border-radius: 8px; padding: 10px; font-size: 14px; }
   .contact { display: flex; flex-wrap: wrap; gap: 24px; justify-content: space-between; align-items: center; padding: 28px; }
 </style>
 </head>
@@ -49,10 +66,17 @@
       <a href="#how">How it works</a>
       <a href="#sample" id="navSample" class="hidden">Sample event</a>
       <a href="#contact">Contact</a>
-      <a class="btn small light" href="/admin" id="loginLink">Log in</a>
+      <button class="btn small light" type="button" id="codeLink">Enter event code</button>
     </nav>
   </div>
 </header>
+
+<section class="livestrip hidden" id="liveStrip" aria-label="Events live now">
+  <div class="wrap">
+    <div class="ls-text"><b>Happening now.</b> Tap your event and enter the code shown on the screen.</div>
+    <div class="ls-btns" id="liveBtns"></div>
+  </div>
+</section>
 
 <section class="hero">
   <div class="wrap">
@@ -123,12 +147,39 @@
   <div class="wrap" style="display:flex;flex-wrap:wrap;gap:8px 24px;justify-content:space-between">
     <div>© <span id="yr"></span> PROMEDIA CREATIVE SOLUTIONS (JR0113470-V) · <a href="https://johorstudio.com">JohorStudio.com</a></div>
     <div>3038-A, Jln Merbau Satu, Bandar Putra, 81000 Kulai, Johor</div>
+    <div class="foot-links"><button class="linkbtn" type="button" id="organiserLink">Organiser</button> · <a href="/admin">Admin</a></div>
   </div>
 </footer>
 
+<div class="modal hidden" id="codeModal" role="dialog" aria-modal="true" aria-labelledby="cmTitle">
+  <div class="modal-box code-box">
+    <button class="cm-close" type="button" id="cmClose" aria-label="Close">×</button>
+    <div class="cm-kicker" id="cmKicker">LIVE PHOTO</div>
+    <h2 id="cmTitle">Looking for your event?</h2>
+    <p class="cm-sub" id="cmSub">Enter the 6-digit code shown on the screen at your event.</p>
+    <div id="cmBack" class="hidden"></div>
+    <div id="cmBoxes"></div>
+    <div class="field hidden" id="cmNameField">
+      <label for="cmName">Your name</label>
+      <input class="input" id="cmName" maxlength="30" autocomplete="name" placeholder="e.g. Aiman">
+    </div>
+    <p class="error" id="cmErr" role="alert"></p>
+    <button class="btn cm-go" type="button" id="cmGo">Send photos</button>
+    <details class="help">
+      <summary>Where do I get this code?</summary>
+      <p id="cmHelp">It is on the big screen, on banners and table cards at the event. You can also ask the organiser or committee.</p>
+    </details>
+    <div class="cm-alt">
+      <button class="linkbtn" type="button" id="cmPhotog">Sign in as photographer</button>
+      <button class="linkbtn hidden" type="button" id="cmGuest">I'm a guest</button>
+    </div>
+  </div>
+</div>
+
 <script type="module">
-import { $, $$, icon, fmtDate } from '/js/common.js';
+import { $, $$, icon, fmtDate, esc } from '/js/common.js';
 import { PhotoGrid, openLightbox } from '/js/grid.js';
+import { codeBoxes, sendCode } from '/js/codebox.js';
 
 $('#yr').textContent = new Date().getFullYear();
 $$('.wa-icon').forEach((s) => { s.outerHTML = icon.wa; });
@@ -137,7 +188,86 @@ fetch('/auth/config').then((r) => r.json()).then((c) => {
   $$('a.wa').forEach((a) => { a.href = `https://wa.me/${c.whatsapp}?text=Hi%20Rafi`; });
   $('#contactLink').href = c.contactUrl;
 }).catch(() => {});
-fetch('/api/me').then((r) => { if (r.ok) $('#loginLink').textContent = 'My events'; }).catch(() => {});
+
+// ---------- code popup: guest (default), photographer, organiser ----------
+const MODES = {
+  guest: { kicker: 'LIVE PHOTO', title: 'Looking for your event?', sub: 'Enter the 6-digit code shown on the screen at your event.', go: 'Send photos',
+    help: 'It is on the big screen, on banners and table cards at the event. You can also ask the organiser or committee.' },
+  photographer: { kicker: 'PHOTOGRAPHER', title: 'Sign in as photographer', sub: 'Enter the photographer code from the event admin, and your name.', go: 'Sign in',
+    help: 'The photographer code is different from the guest code. Ask the JohorStudio.com admin or the event organiser.' },
+  client: { kicker: 'ORGANISER', title: 'Organiser panel', sub: 'Enter the organiser code from JohorStudio.com to review guest photos.', go: 'Open panel',
+    help: 'The organiser code was sent to you by JohorStudio.com with your booking.' },
+};
+let mode = 'guest', busy = false;
+const boxes = codeBoxes($('#cmBoxes'), { onChange: () => { $('#cmErr').textContent = ''; }, onComplete: () => { if (mode !== 'photographer' || $('#cmName').value.trim()) submit(); } });
+function setMode(m, eventName) {
+  mode = m;
+  const t = MODES[m];
+  $('#cmKicker').textContent = t.kicker;
+  $('#cmTitle').textContent = eventName && m === 'guest' ? eventName : t.title;
+  $('#cmSub').textContent = t.sub;
+  $('#cmGo').textContent = t.go;
+  $('#cmHelp').textContent = t.help;
+  $('#cmNameField').classList.toggle('hidden', m !== 'photographer');
+  $('#cmPhotog').classList.toggle('hidden', m !== 'guest');
+  $('#cmGuest').classList.toggle('hidden', m === 'guest');
+  $('#cmErr').textContent = '';
+}
+function openModal(m = 'guest', { eventName, code } = {}) {
+  setMode(m, eventName);
+  $('#codeModal').classList.remove('hidden');
+  if (code) { boxes.set(code); if (m === 'guest') submit(); } else boxes.focus();
+}
+const closeModal = () => { $('#codeModal').classList.add('hidden'); try { sessionStorage.setItem('lp-skip', '1'); } catch {} };
+$('#cmClose').onclick = closeModal;
+$('#codeModal').addEventListener('click', (e) => { if (e.target.id === 'codeModal') closeModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#codeModal').classList.contains('hidden')) closeModal(); });
+$('#cmPhotog').onclick = () => { setMode('photographer'); boxes.clear(); };
+$('#cmGuest').onclick = () => { setMode('guest'); boxes.clear(); };
+$('#codeLink').onclick = () => openModal('guest');
+$('#organiserLink').onclick = () => openModal('client');
+$('#cmGo').onclick = () => submit();
+$('#cmName').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+
+async function submit() {
+  if (busy) return;
+  const code = boxes.get();
+  if (code.length !== 6) { $('#cmErr').textContent = 'Enter all 6 digits.'; boxes.focus(); return; }
+  const name = $('#cmName').value.trim();
+  if (mode === 'photographer' && !name) { $('#cmErr').textContent = 'Type your name.'; $('#cmName').focus(); return; }
+  busy = true; $('#cmGo').disabled = true;
+  try {
+    const r = await sendCode(code, { want: mode, name });
+    location.href = r.next;
+  } catch (e) {
+    if (e.status === 401) boxes.clear();
+    $('#cmErr').textContent = e.message;
+    boxes.shake();
+  } finally { busy = false; $('#cmGo').disabled = false; }
+}
+
+// ---------- events live now ----------
+const qrCode = (location.pathname.match(/^\/c\/(\d{6})/) || [])[1];
+Promise.all([
+  fetch('/api/live-status').then((r) => r.json()).catch(() => ({ live: [] })),
+  fetch('/api/me').then((r) => r.json()).catch(() => ({})),
+]).then(([status, me]) => {
+  const live = status.live || [];
+  if (live.length) {
+    $('#liveStrip').classList.remove('hidden');
+    $('#liveBtns').innerHTML = live.map((e) => `<button class="live-btn" type="button" data-name="${esc(e.name)}">
+      <span class="lb-top">LIVE PHOTO ACTIVE</span><span class="lb-name">${esc(e.name)}</span></button>`).join('');
+    $$('.live-btn').forEach((b) => b.onclick = () => openModal('guest', { eventName: b.dataset.name === 'Event in progress' ? '' : b.dataset.name }));
+  }
+  if (me.guest) {
+    $('#cmBack').classList.remove('hidden');
+    $('#cmBack').innerHTML = `<div class="cm-back">You are in <b>${esc(me.guest.event.title)}</b>. <a href="/e/${esc(me.guest.token)}">Back to the gallery →</a></div>`;
+  }
+  let skipped = false;
+  try { skipped = sessionStorage.getItem('lp-skip') === '1'; } catch {}
+  if (qrCode) { history.replaceState(null, '', '/'); openModal('guest', { code: qrCode }); }
+  else if (live.length && !skipped) openModal('guest', { eventName: live.length === 1 && live[0].name !== 'Event in progress' ? live[0].name : '' });
+});
 
 // Sample section only appears when the admin has featured an event.
 fetch('/api/showcase').then((r) => r.json()).then(({ event, photos }) => {

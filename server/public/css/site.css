@@ -93,3 +93,29 @@ button, input, select { font: inherit; }
 
 footer.site { background: var(--graphite); color: #aab6b8; font-size: 14px; padding: 28px 0; }
 footer.site a { color: var(--mist); }
+
+/* 6-digit code boxes */
+.codeboxes { display: flex; gap: 8px; justify-content: center; }
+.codeboxes .cb { width: 46px; height: 58px; text-align: center; font: 700 26px var(--font); border: 1.5px solid var(--line); border-radius: 10px;
+  background: #fff; color: var(--ink); font-variant-numeric: tabular-nums; padding: 0; }
+.codeboxes .cb:nth-child(3) { margin-right: 10px; }
+.codeboxes .cb:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px var(--teal-soft); }
+.codeboxes.bad .cb { border-color: var(--tally); }
+@media (prefers-reduced-motion: no-preference) { .codeboxes.bad { animation: shake .35s; } }
+@keyframes shake { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+@media (max-width: 380px) { .codeboxes .cb { width: 40px; height: 52px; font-size: 22px; } .codeboxes { gap: 6px; } .codeboxes .cb:nth-child(3) { margin-right: 6px; } }
+
+/* LIVE PHOTO ACTIVE: red, pulsing, impossible to miss */
+.live-btn { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; background: var(--tally); color: #fff; border: 0; border-radius: 12px;
+  padding: 12px 18px 12px 16px; cursor: pointer; text-align: left; font-family: var(--font); position: relative; }
+.live-btn .lb-top { display: flex; align-items: center; gap: 8px; font-weight: 800; letter-spacing: .08em; font-size: 15px; }
+.live-btn .lb-top::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: #fff; }
+.live-btn .lb-name { font-size: 14px; opacity: .92; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (prefers-reduced-motion: no-preference) {
+  .live-btn { animation: livepulse 1.6s ease-in-out infinite; }
+  .live-btn .lb-top::before { animation: pulse 1.6s ease-in-out infinite; }
+}
+@keyframes livepulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(214,69,61,.55); } 50% { box-shadow: 0 0 0 12px rgba(214,69,61,0); } }
+.help { font-size: 13px; color: var(--steel); }
+.help summary { cursor: pointer; color: var(--teal); }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--teal); cursor: pointer; font: inherit; text-decoration: underline; }

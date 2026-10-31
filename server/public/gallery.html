@@ -65,13 +65,14 @@
 <input type="file" id="picker" accept="image/*" multiple hidden>
 
 <script type="module">
-import { $, $$, esc, toast, modal, icon } from '/js/common.js';
+import { $, $$, esc, toast, modal, icon, api } from '/js/common.js';
+import { codeBoxes, sendCode } from '/js/codebox.js';
 import { PhotoGrid, openLightbox, liveFeed } from '/js/grid.js';
 
 const token = location.pathname.split('/')[2];
 const base = `/p/${token}`;
 const urlFor = (p, size) => `${base}/${p.id}/${size >= 1600 ? 1600 : 480}`;
-let filter = 'all', total = 0, ended = false;
+let filter = 'all', total = 0, ended = false, guest = {}, eventInfo = {};
 
 const grid = new PhotoGrid($('#grid'), {
   urlFor,
@@ -104,7 +105,8 @@ async function load() {
   document.title = `${d.event.title} · JohorStudio.com Live`;
   $('#title').textContent = d.event.title;
   $('#wa').href = `https://wa.me/${d.whatsapp}`;
-  if (d.event.publicUpload) { const b = $('#uploadBtn'); b.hidden = false; b.innerHTML = `${icon.up}Upload`; }
+  guest = d.guest; eventInfo = d.event;
+  renderUploadBtn();
   grid.set(d.photos);
   ended = d.photos.length < 120;
   $('#more').classList.toggle('hidden', ended);
@@ -114,6 +116,7 @@ async function load() {
     onPhoto: (p) => { grid.addLive(p); setTimeout(() => status(), 1100); },
     onRemove: (id) => { grid.remove(id); status(); },
     onGone: gone, onStatus: status,
+    onClosed: refreshGuest,
   });
 }
 
@@ -133,9 +136,61 @@ $$('.tab').forEach((t) => t.onclick = () => {
 let busy = false;
 const leaveWarning = (e) => { if (busy) { e.preventDefault(); e.returnValue = ''; } };
 window.addEventListener('beforeunload', leaveWarning);
-$('#uploadBtn').onclick = () => { if (!busy) $('#picker').click(); };
+function renderUploadBtn() {
+  const b = $('#uploadBtn');
+  b.hidden = !guest.uploadsOpen;
+  b.innerHTML = `${icon.up}Upload`;
+}
+async function refreshGuest() {
+  try { const d = await api('GET', `/api/e/${token}`); guest = d.guest; eventInfo = d.event; renderUploadBtn(); } catch { /* ignore */ }
+}
+// Upload = code (once) -> photo notice (once) -> choose photos.
+$('#uploadBtn').onclick = async () => {
+  if (busy) return;
+  if (!guest.signedIn) return askCode();
+  if (!guest.agreed) return askNotice();
+  if (guest.uploadsLeft <= 0) return toast('You have reached the photo limit for this event. Thank you!', 4000);
+  $('#picker').click();
+};
+function askCode() {
+  const m = modal(`<h2>Enter the event code</h2>
+    <p style="margin:0" class="muted">The 6-digit code is on the big screen at the event. Or ask the organiser.</p>
+    <div id="gBoxes"></div><p class="error" id="gErr"></p>
+    <div class="linkrow" style="display:flex;gap:8px"><button class="btn" id="gGo">Continue</button><button class="btn ghost" data-close>Cancel</button></div>`);
+  const go = async () => {
+    try { await sendCode(bx.get(), { want: 'guest' }); m.close(); await refreshGuest(); $('#uploadBtn').click(); }
+    catch (e) { if (e.status === 401) bx.clear(); $('#gErr', m.el).textContent = e.message; bx.shake(); }
+  };
+  const bx = codeBoxes($('#gBoxes', m.el), { onComplete: go });
+  $('#gGo', m.el).onclick = go;
+  bx.focus();
+}
+function askNotice() {
+  const who = eventInfo.organiser || 'the organiser';
+  const m = modal(`<h2>Show us your best shot from tonight!</h2>
+    <p style="margin:0">Your photos go to the live gallery and the big screen at this event.</p>
+    <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px" class="small">
+      <li>Photos are <b>public</b>: everyone with the event link can see them.</li>
+      <li>${esc(who)} may share them on their social media.</li>
+      <li>Every photo is checked first. Photos that are rude, political or not from the event are removed.</li>
+      <li>Up to ${guest.uploadsLeft} photos per phone.</li>
+    </ul>
+    <div class="field"><label for="gName">Your name on the photo <span class="muted">(optional)</span></label>
+      <input class="input" id="gName" maxlength="20" placeholder="e.g. Siti"></div>
+    <label class="check"><input type="checkbox" id="gAgree"><span>I agree, my photos can be shown publicly.</span></label>
+    <p class="error" id="nErr"></p>
+    <div style="display:flex;gap:8px"><button class="btn" id="nGo">Choose photos</button><button class="btn ghost" data-close>Cancel</button></div>`);
+  try { $('#gName', m.el).value = localStorage.getItem('lp-name') || ''; } catch {}
+  $('#nGo', m.el).onclick = async () => {
+    if (!$('#gAgree', m.el).checked) { $('#nErr', m.el).textContent = 'Tick the box to continue.'; return; }
+    try { localStorage.setItem('lp-name', $('#gName', m.el).value.trim()); } catch {}
+    try { const r = await api('POST', `/api/e/${token}/agree`); guest = r.guest; m.close(); $('#picker').click(); }
+    catch (e) { $('#nErr', m.el).textContent = e.message; }
+  };
+}
 $('#picker').onchange = async (e) => {
-  const files = [...e.target.files];
+  let files = [...e.target.files];
+  if (files.length > guest.uploadsLeft) { toast(`Only ${guest.uploadsLeft} more photo${guest.uploadsLeft === 1 ? '' : 's'} allowed. Uploading the first ${guest.uploadsLeft}.`, 4000); files = files.slice(0, guest.uploadsLeft); }
   e.target.value = '';
   if (!files.length) return;
   busy = true;
@@ -161,17 +216,18 @@ $('#picker').onchange = async (e) => {
       set(0, 'Converting to WebP on your phone…');
       const out = await preparePhoto(f, 0.5);
       set(0.3, 'Uploading…');
-      await uploadPhoto({ startUrl: `/api/e/${token}/uploads`, startBody: { name: 'photo.webp' }, blob: out.blob,
+      await uploadPhoto({ startUrl: `/api/e/${token}/uploads`, startBody: { name: 'photo.webp', uploader: (() => { try { return localStorage.getItem('lp-name') || ''; } catch { return ''; } })() }, blob: out.blob,
         thumbs: out.thumbs, onProgress: (x) => set(0.3 + x * 0.7) });
       ok++;
     } catch (err) {
       failed.push(`${f.name}: ${err.message}`);
-      if (err.status === 403) break;
+      if ([401, 403, 428, 429].includes(err.status)) break;
     }
   }
   busy = false;
+  refreshGuest();
   $('#uBar', m.el).style.width = '100%';
-  $('#uStep', m.el).textContent = ok ? `${ok} photo${ok > 1 ? 's' : ''} added to the gallery. Thank you!` : 'Nothing was uploaded.';
+  $('#uStep', m.el).textContent = ok ? `${ok} photo${ok > 1 ? 's' : ''} sent. They appear in the gallery after a quick check. Thank you!` : 'Nothing was uploaded.';
   $('.warn', m.el).classList.add('hidden');
   if (failed.length) $('#uErr', m.el).innerHTML = failed.map(esc).join('<br>');
   $('#uDone', m.el).classList.remove('hidden');

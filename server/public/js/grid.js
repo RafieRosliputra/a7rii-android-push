@@ -96,7 +96,7 @@ export function openLightbox(list, start, { urlFor, downloadUrl, actions = () =>
 
 // Live updates: SSE first, polling every 5 s as a fallback (30 s while the tab is hidden).
 // getCursor() returns the newest photo seq the page already has.
-export function liveFeed({ streamUrl, pollUrl, getCursor, onPhoto, onRemove, onGone, onStatus }) {
+export function liveFeed({ streamUrl, pollUrl, getCursor, onPhoto, onRemove, onGone, onStatus, onClosed, onSettings }) {
   let es = null, pollTimer, alive = true;
   const status = (s) => onStatus?.(s);
   const catchUp = async () => {
@@ -116,6 +116,8 @@ export function liveFeed({ streamUrl, pollUrl, getCursor, onPhoto, onRemove, onG
     es.addEventListener('photo', (e) => { onPhoto(JSON.parse(e.data)); status('live'); });
     es.addEventListener('remove', (e) => onRemove?.(JSON.parse(e.data).id));
     es.addEventListener('gone', () => { onGone?.(); stop(); });
+    es.addEventListener('closed', () => onClosed?.());
+    es.addEventListener('settings', (e) => onSettings?.(JSON.parse(e.data)));
     es.onerror = () => {
       status('reconnecting');
       if (es && es.readyState === EventSource.CLOSED) { es = null; clearTimeout(pollTimer); pollTimer = setTimeout(() => { poll(); setTimeout(() => alive && !es && connect(), 30000); }, 5000); }

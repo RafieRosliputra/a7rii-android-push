@@ -11,282 +11,367 @@
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/site.css">
 <style>
-  .subnav { background: #fff; border-bottom: 1px solid var(--mist); }
-  .subnav .wrap { display: flex; gap: 4px; overflow-x: auto; }
-  .subnav button { border: 0; background: none; padding: 14px 14px 12px; font-weight: 600; color: var(--steel); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
-  .subnav button[aria-selected="true"] { color: var(--ink); border-color: var(--teal); }
-  .banner { background: #fbe4e2; color: #8a2a24; padding: 10px 16px; font-size: 14px; font-weight: 600; }
-  .layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 20px; padding: 20px 16px 48px; }
-  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } .layout.detail-open .elist { display: none; } }
-  @media (min-width: 861px) { .back { display: none !important; } }
+  .banner { padding: 10px 16px; font-size: 14px; font-weight: 600; }
+  .banner.red { background: #fbe4e2; color: #8a2a24; }
+  .banner.amber { background: #fff2dc; color: #7a4a00; }
+  .layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 20px; padding: 20px 0 60px; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .layout.detail-open .elist { display: none; } }
+  @media (min-width: 901px) { .back { display: none !important; } }
+  .panel-mode .layout { grid-template-columns: 1fr; } .panel-mode .elist, .panel-mode .back { display: none !important; }
   .elist { display: flex; flex-direction: column; gap: 10px; }
   .elist-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-  .eitem { text-align: left; width: 100%; padding: 12px 14px; border: 1px solid var(--mist); background: #fff; border-radius: 10px; cursor: pointer; display: flex; flex-direction: column; gap: 2px; color: var(--ink); }
-  .eitem:hover { border-color: var(--line); }
+  .eitem { text-align: left; width: 100%; padding: 12px 14px; border: 1px solid var(--mist); background: #fff; border-radius: 10px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; color: var(--ink); }
   .eitem[aria-current="true"] { border-color: var(--teal); box-shadow: 0 0 0 1px var(--teal); }
   .eitem .t { font-weight: 600; overflow-wrap: anywhere; }
-  .eitem .m { font-size: 13px; color: var(--steel); }
+  .eitem .m { font-size: 13px; color: var(--steel); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px; background: var(--mist); color: var(--ink); text-transform: uppercase; }
+  .chip.live { background: var(--tally); color: #fff; } .chip.live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #fff; }
+  .chip.scheduled { background: #fff2dc; color: #7a4a00; } .chip.review { background: #fbe4e2; color: #8a2a24; }
   .detail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-  .dhead { padding: 18px; display: flex; flex-direction: column; gap: 14px; }
-  .dhead h2 { margin: 0; font-size: 24px; font-stretch: 85%; overflow-wrap: anywhere; }
-  .linkrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  .linkbox { flex: 1 1 220px; min-width: 0; font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: var(--paper); border: 1px solid var(--mist); border-radius: 8px; padding: 9px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .stats { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 14px; color: var(--steel); }
-  .stats b { color: var(--ink); font-size: 20px; margin-right: 4px; }
   .section { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
   .section h3 { margin: 0; font-size: 17px; }
-  .prow { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; padding: 10px 0; border-top: 1px solid var(--mist); }
-  .prow:first-of-type { border-top: 0; }
-  .addrow { display: flex; flex-wrap: wrap; gap: 8px; }
-  .addrow .input { flex: 1 1 200px; width: auto; }
-  .urow { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; padding: 12px 0; border-top: 1px solid var(--mist); }
-  .photos-head { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; }
-  .empty-state { padding: 40px 16px; text-align: center; color: var(--steel); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .row .grow { flex: 1 1 200px; min-width: 0; }
+  h2.title { margin: 0; font-size: 24px; font-stretch: 85%; overflow-wrap: anywhere; }
+  .codes { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+  .code { border: 1px solid var(--mist); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .code .lbl { font-size: 12px; letter-spacing: .08em; color: var(--steel); font-weight: 700; text-transform: uppercase; }
+  .code .num { font-size: 30px; font-weight: 800; font-stretch: 80%; letter-spacing: .06em; font-variant-numeric: tabular-nums; }
+  .code .acts { display: flex; gap: 10px; font-size: 13px; }
+  .inline { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+  .inline .input { padding: 8px 10px; }
+  .grid4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tab { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 5px 12px; font-size: 14px; cursor: pointer; color: var(--ink); }
+  .tab[aria-pressed="true"] { background: var(--graphite); color: #fff; border-color: var(--graphite); }
+  .rlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .rcard { border: 1px solid var(--mist); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; background: #fff; }
+  .rcard img { width: 100%; height: 200px; object-fit: cover; background: #2b3438; cursor: zoom-in; }
+  .rcard .rb { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .flags { display: flex; gap: 4px; flex-wrap: wrap; }
   .usermenu { display: flex; align-items: center; gap: 12px; font-size: 14px; color: var(--mist); }
+  .reqbox { background: #fff2dc; color: #5c3a00; border-radius: 10px; padding: 12px 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+  .qrwrap { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+  .qrwrap img { width: min(360px, 80vw); image-rendering: pixelated; }
+  .qrwrap .big { font-size: 56px; font-weight: 800; font-stretch: 80%; letter-spacing: .08em; font-variant-numeric: tabular-nums; }
+  .modal-box.wide { max-width: 560px; }
+  .empty-state { padding: 30px 16px; text-align: center; color: var(--steel); }
 </style>
 </head>
 <body>
 <header class="topbar">
   <div class="wrap">
     <a class="brand" href="/"><span class="brand-name">JohorStudio.com</span><span class="live-badge">LIVE</span></a>
-    <div class="usermenu"><span id="me"></span><button class="btn small light" id="logoutBtn">Log out</button></div>
+    <div class="usermenu"><span id="me"></span><button class="btn small light hidden" id="logoutBtn">Sign out</button></div>
   </div>
 </header>
-<div class="banner hidden" id="offline">Storage is offline (the photo server can't reach tnas). Uploads are paused; the app keeps photos on the phone and retries.</div>
-<nav class="subnav"><div class="wrap" role="tablist">
-  <button role="tab" aria-selected="true" data-tab="events">EVENTS</button>
-  <button role="tab" aria-selected="false" data-tab="users" class="hidden" id="usersTab">Users</button>
-</div></nav>
-
+<div id="banners"></div>
 <div class="wrap">
-  <div id="eventsView" class="layout">
+  <div id="view" class="layout">
     <aside class="elist">
       <div class="elist-head"><h1 style="margin:0;font-size:20px">EVENTS</h1><button class="btn small" id="newBtn">+ New event</button></div>
-      <p class="small muted" style="margin:0" id="scopeNote"></p>
+      <p class="small muted" style="margin:0" id="liveNote"></p>
       <div id="elist" style="display:flex;flex-direction:column;gap:8px"></div>
     </aside>
-    <section class="detail" id="detail">
-      <div class="card empty-state">Choose an event, or create a new one.</div>
-    </section>
-  </div>
-
-  <div id="usersView" class="hidden" style="padding:20px 0 48px;max-width:760px">
-    <div class="card section">
-      <h3>Users</h3>
-      <p class="small muted" style="margin:0">Only emails listed here can log in, with Google (same email) or a 6-digit code sent by email. Removing a user keeps their folders; adding the same email again brings their events back.</p>
-      <form class="addrow" id="addUser">
-        <input class="input" type="email" name="email" placeholder="Email" required>
-        <input class="input" name="name" placeholder="Name (optional)" style="flex:1 1 140px">
-        <select class="input" name="role" style="flex:0 0 110px"><option value="user">User</option><option value="admin">Admin</option></select>
-        <button class="btn">Add</button>
-      </form>
-      <div id="ulist"></div>
-    </div>
+    <section class="detail" id="detail"><div class="card empty-state">Choose an event, or create a new one.</div></section>
   </div>
 </div>
 
 <script type="module">
-import { $, $$, api, esc, toast, modal, fmtDate, todayYmd, ago, copyText, qrDataUrl, icon } from '/js/common.js';
+import { $, $$, api, esc, toast, modal, fmtDate, todayYmd, copyText, qrDataUrl, icon } from '/js/common.js';
 import { PhotoGrid, openLightbox, liveFeed } from '/js/grid.js';
+import { codeBoxes, sendCode } from '/js/codebox.js';
 
-let me, events = [], current = null, grid = null, feed = null;
+const PANEL = location.pathname.startsWith('/panel');
+const BASE = PANEL ? '/api/client' : '/api/admin';
+let events = [], cur = null, feed = null, grid = null, photoFilter = 'review';
+if (PANEL) document.body.classList.add('panel-mode');
 
-let meRes;
-try { meRes = await api('GET', '/api/me'); }
-catch { location.href = '/login?next=/admin'; throw new Error('login'); }
-me = meRes.user;
-$('#offline').classList.toggle('hidden', meRes.storageOnline);
-$('#me').textContent = `${me.email} · ${me.role === 'admin' ? 'Admin' : 'User'}`;
-$('#scopeNote').textContent = me.role === 'admin' ? 'Admins see every event.' : 'Events you created or were assigned to.';
-if (me.role === 'admin') $('#usersTab').classList.remove('hidden');
-$('#logoutBtn').onclick = async () => { await api('POST', '/auth/logout'); location.href = '/'; };
+const fmtCode = (c) => c ? `${c.slice(0, 3)} ${c.slice(3)}` : '';
+const when = (ms) => ms ? new Date(ms).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+const localInput = (ms) => { const d = new Date(ms - new Date().getTimezoneOffset() * 60e3); return d.toISOString().slice(0, 16); };
+const STATUS = { live: 'Live', scheduled: 'Scheduled', draft: 'Not started', ended: 'Ended', closed: 'Closed' };
+const chip = (st) => `<span class="chip ${st}">${STATUS[st] || st}</span>`;
 
-$$('[data-tab]').forEach((b) => b.onclick = () => {
-  $$('[data-tab]').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
-  $('#eventsView').classList.toggle('hidden', b.dataset.tab !== 'events');
-  $('#usersView').classList.toggle('hidden', b.dataset.tab !== 'users');
-  if (b.dataset.tab === 'users') loadUsers();
-});
+// ---------------- sign in ----------------
+async function start() {
+  if (PANEL) {
+    try {
+      const { event } = await api('GET', '/api/client/me');
+      $('#me').textContent = `Organiser · ${event.title}`;
+      $('#logoutBtn').classList.remove('hidden');
+      $('#logoutBtn').onclick = async () => { await api('POST', '/auth/logout', { role: 'client' }); location.reload(); };
+      document.title = `${event.title} · Organiser`;
+      return openEvent(event.id);
+    } catch { return panelLogin(); }
+  }
+  let me;
+  try { me = await api('GET', '/api/admin/me'); }
+  catch (e) { $('#detail').innerHTML = `<div class="card empty-state">${esc(e.message)}. <a href="/admin">Reload</a> to sign in with Cloudflare.</div>`; $('.elist').classList.add('hidden'); return; }
+  $('#me').textContent = `${me.email} · Admin`;
+  if (!me.storageOnline) banner('red', 'Storage is offline (the server cannot reach tnas). Uploads are paused; the app keeps photos on the phone and retries.');
+  await loadEvents();
+  setInterval(loadEvents, 30000);
+}
+function banner(kind, text) { const d = document.createElement('div'); d.className = `banner ${kind}`; d.textContent = text; $('#banners').appendChild(d); }
 
-// ---------------- events ----------------
+function panelLogin() {
+  $('#detail').innerHTML = `<div class="card section" style="max-width:420px;margin:20px auto;text-align:center">
+    <h2 class="title">Organiser panel</h2><p class="muted small" style="margin:0">Enter the organiser code from JohorStudio.com.</p>
+    <div id="pb"></div><p class="error" id="pe"></p><button class="btn" id="pg">Open panel</button></div>`;
+  const go = async () => { try { await sendCode(bx.get(), { want: 'client' }); location.reload(); } catch (e) { if (e.status === 401) bx.clear(); $('#pe').textContent = e.message; bx.shake(); } };
+  const bx = codeBoxes($('#pb'), { onComplete: go });
+  $('#pg').onclick = go; bx.focus();
+}
+
+// ---------------- event list (admin) ----------------
 async function loadEvents(selectId) {
-  ({ events } = await api('GET', '/api/events'));
+  const d = await api('GET', '/api/admin/events');
+  events = d.events;
+  $('#liveNote').textContent = d.liveCount ? `${d.liveCount} live now${d.liveCount > 3 ? ' (more than 3)' : ''}` : 'No event is live.';
   $('#elist').innerHTML = events.length ? events.map((e) => `
-    <button class="eitem" data-id="${e.id}" aria-current="${current?.event.id === e.id}">
+    <button class="eitem" data-id="${e.id}" aria-current="${cur?.event.id === e.id}">
       <span class="t">${esc(e.title)}</span>
-      <span class="m">${esc(fmtDate(e.date))} · ${e.photoCount} photo${e.photoCount === 1 ? '' : 's'}${me.role === 'admin' && e.owner ? ' · ' + esc(e.owner.name || e.owner.email) : ''}</span>
+      <span class="m">${chip(e.status)}${e.reviewCount ? `<span class="chip review">${e.reviewCount} to review</span>` : ''}${e.request ? '<span class="chip scheduled">request</span>' : ''}<span>${esc(fmtDate(e.date))} · ${e.photoCount} photos</span></span>
     </button>`).join('') : '<p class="muted small">No events yet.</p>';
   $$('.eitem').forEach((b) => b.onclick = () => openEvent(b.dataset.id));
-  const want = selectId || (location.hash.slice(1) && events.some((e) => e.id === location.hash.slice(1)) ? location.hash.slice(1) : null);
-  if (want) openEvent(want);
+  const want = selectId || (!cur && location.hash.slice(1));
+  if (want && events.some((e) => e.id === want)) openEvent(want);
 }
 
 async function openEvent(id) {
   feed?.stop();
-  current = await api('GET', `/api/events/${id}`);
-  history.replaceState(null, '', `#${id}`);
+  cur = await api('GET', `${BASE}/events/${id}`);
+  if (!PANEL) history.replaceState(null, '', `#${id}`);
   $$('.eitem').forEach((b) => b.setAttribute('aria-current', String(b.dataset.id === id)));
-  $('#eventsView').classList.add('detail-open');
-  renderDetail();
+  $('#view').classList.add('detail-open');
+  render();
 }
+async function refresh() { cur = await api('GET', `${BASE}/events/${cur.event.id}`); render(); if (!PANEL) loadEvents(); }
 
-function renderDetail() {
-  const { event: e, members, viewers } = current;
-  const admin = me.role === 'admin';
+// ---------------- event detail ----------------
+function render() {
+  const e = cur.event, admin = !PANEL;
+  const req = e.request;
   $('#detail').innerHTML = `
     <button class="btn ghost small back" style="align-self:flex-start" id="backBtn">← All events</button>
-    <div class="card dhead">
-      <div>
-        <div class="small muted">EVENTS / ${esc(e.folder)}</div>
-        <h2>${esc(e.title)}</h2>
-        <div class="small muted">${esc(fmtDate(e.date))}${e.owner ? ' · created by ' + esc(e.owner.name || e.owner.email) : ''}</div>
+    <div class="card section">
+      <div class="row" style="justify-content:space-between">
+        <div style="min-width:0"><div class="small muted">EVENTS / ${esc(e.folder)}</div><h2 class="title">${esc(e.title)}</h2>
+          <div class="small muted">${esc(fmtDate(e.date))}${e.organiser ? ' · ' + esc(e.organiser) : ''}</div></div>
+        <div>${chip(e.status)}</div>
       </div>
-      <div class="linkrow">
-        <div class="linkbox" title="${esc(e.url)}">${esc(e.url.replace(/^https?:\/\//, ''))}</div>
-        <button class="btn small ghost" id="copyBtn">Copy</button>
-        <a class="btn small ghost" href="/e/${esc(e.token)}" target="_blank" rel="noopener">Open</a>
-        <button class="btn small" id="qrBtn">${icon.qr}QR code</button>
+      ${req && admin ? `<div class="reqbox"><span><b>Organiser request:</b> ${req.type === 'activate' ? `start the event at ${esc(when(req.startsAt))}` : 'close the event now'}</span>
+        <span class="row"><button class="btn small" id="reqOk">${req.type === 'activate' ? 'Approve and go live' : 'Approve and close'}</button><button class="btn small ghost" id="reqNo">Dismiss</button></span></div>` : ''}
+      ${req && !admin ? `<div class="reqbox">Your request to ${req.type === 'activate' ? 'start the event' : 'close the event'} is waiting for JohorStudio.com.</div>` : ''}
+      ${liveControls(e, admin)}
+    </div>
+
+    <div class="card section">
+      <h3>Codes for the big screen</h3>
+      <div class="codes">
+        ${codeCard('Guests', 'public', e.codes.public, admin, 'Shown on the LED screen. Changes every time the event goes live or closes.')}
+        ${admin ? codeCard('Photographers', 'photographer', e.codes.photographer, admin, 'For JS Tether and photographers. Do not show on screen.') : ''}
+        ${admin ? codeCard('Organiser', 'client', e.codes.client, admin, 'Give to the client. Works until 7 days after the event.') : ''}
       </div>
-      <div class="stats">
-        <span><b>${e.photoCount}</b>photos</span><span><b>${e.guestCount}</b>from guests</span><span><b>${viewers}</b>watching now</span>
+      <div class="row">
+        <button class="btn" id="qrBtn">${icon.qr}Big screen code + QR</button>
+        <a class="btn ghost" href="/show/${e.id}" target="_blank" rel="noopener">Open big screen</a>
+        <button class="btn ghost" id="copyLink">Copy gallery link</button>
       </div>
-      ${e.canManage ? `
-      <label class="check"><input type="checkbox" id="guestToggle" ${e.publicUpload ? 'checked' : ''}><span>Allow guest uploads <span class="muted small">(saved to the "public upload" folder)</span></span></label>
-      ${admin ? `<label class="check"><input type="checkbox" id="sampleToggle" ${e.showcase ? 'checked' : ''}><span>Feature as the sample event on the landing page</span></label>` : ''}` : ''}
+    </div>
+
+    ${admin ? `<div class="card section">
+      <h3>Event settings</h3>
+      <div class="grid4">
+        <label class="inline">Organiser name (in the photo notice)<input class="input" id="sOrg" maxlength="80" value="${esc(e.organiser)}"></label>
+      </div>
+      <label class="check"><input type="checkbox" id="sHide" ${e.hideName ? 'checked' : ''}><span>Hide the event name on the public site (shows "Event in progress")</span></label>
+      <label class="check"><input type="checkbox" id="sUp" ${e.publicUpload ? 'checked' : ''}><span>Allow guest uploads</span></label>
+      <label class="check"><input type="checkbox" id="sShow" ${e.showcase ? 'checked' : ''}><span>Feature as the sample event on the landing page</span></label>
+      <h3 style="margin-top:6px">Big screen</h3>
+      <div class="grid4">
+        <label class="inline">New photo shown (s)<input class="input" type="number" min="1" max="30" id="sNew" value="${e.settings.newSec}"></label>
+        <label class="inline">Loop photo shown (s)<input class="input" type="number" min="1" max="60" id="sLoop" value="${e.settings.loopSec}"></label>
+        <label class="inline">"Upload your photos!" after (min)<input class="input" type="number" min="1" max="60" id="sIdle" value="${e.settings.idleMin}"></label>
+        <label class="inline">Photos in the loop<select class="input" id="sSrc">
+          ${['all', 'public', 'photographer'].map((v) => `<option value="${v}" ${e.settings.loopSource === v ? 'selected' : ''}>${{ all: 'All photos', public: 'Guests only', photographer: 'Photographers only' }[v]}</option>`).join('')}</select></label>
+      </div>
+      <div><button class="btn" id="saveSet">Save settings</button></div>
     </div>
 
     <div class="card section">
       <h3>Photographers</h3>
-      <div>${members.map((m) => `
-        <div class="prow">
-          <div><b>Photographer ${m.slot}</b> · ${esc(m.name || m.email)} <span class="muted small">${m.name ? esc(m.email) : ''}${m.status === 'removed' ? ' · removed user' : ''}</span>${m.userId === me.id ? ' <span class="pill teal">you</span>' : ''}</div>
-          ${e.canManage ? `<button class="btn small ghost" data-unassign="${m.userId}">Remove</button>` : ''}
-        </div>`).join('') || '<p class="muted small" style="margin:0">No photographers yet.</p>'}
-        <div class="prow"><div><b>public upload</b> · <span class="muted">guests on the web</span></div><span class="pill ${e.publicUpload ? 'teal' : ''}">${e.publicUpload ? 'open' : 'closed'}</span></div>
+      ${cur.photographers.length ? cur.photographers.map((p) => `<div class="row" style="justify-content:space-between;border-top:1px solid var(--mist);padding-top:8px">
+        <span><b>Photographer ${p.slot}</b> · ${esc(p.name)}</span>
+        <span class="row small">Move to <select class="input" style="width:auto;padding:4px 8px" data-slot="${p.slot}">${Array.from({ length: Math.max(6, cur.photographers.length + 2) }, (_, i) => i + 1).map((n) => `<option ${n === p.slot ? 'selected' : ''}>${n}</option>`).join('')}</select></span></div>`).join('')
+        : '<p class="muted small" style="margin:0">Photographers appear here after they sign in with the photographer code and their name.</p>'}
+      ${cur.devices.length ? `<div class="small muted">Signed-in devices: ${cur.devices.map((d) => `${esc(d.name)} (P${d.slot}) <button class="linkbtn" data-kick="${d.id}">sign out</button>`).join(' · ')}</div>` : ''}
+    </div>` : ''}
+
+    <div class="card section">
+      <div class="row" style="justify-content:space-between"><h3>Photos</h3><span class="small muted" id="thumbNote"></span></div>
+      <div class="tabs" id="ptabs">
+        ${[['review', `To review (${e.reviewCount})`], ['all', `All (${e.photoCount})`], ['hidden', 'Hidden'], ['blocked', `Blocked (${e.blockedCount})`]]
+          .map(([k, l]) => `<button class="tab" data-f="${k}" aria-pressed="${photoFilter === k}">${l}</button>`).join('')}
+        ${admin ? '<button class="tab" id="rescanBtn">Check folder</button>' : ''}
       </div>
-      ${e.canManage ? `
-      <form class="addrow" id="addMember">
-        <input class="input" type="email" name="email" placeholder="User email" required list="userEmails">
-        <input class="input" type="number" name="slot" min="1" placeholder="Photographer no. (next: ${nextSlot(members)})" style="flex:0 1 220px">
-        <button class="btn">Add photographer</button>
-      </form><datalist id="userEmails"></datalist>` : ''}
+      <div id="plist"></div>
     </div>
 
-    <div class="card section">
-      <div class="photos-head"><h3>Photos</h3><span class="small muted" id="thumbNote"></span>
-        ${e.canManage ? '<button class="btn small ghost" id="rescanBtn">Check folder for new files</button>' : ''}</div>
-      <div id="grid" class="jgrid"></div>
-      <div id="gridEmpty" class="empty-state hidden">No photos yet. Photos from the app or added to the folder over SMB show up here.</div>
-      <button class="btn ghost hidden" id="moreBtn" style="align-self:center">Load more</button>
-    </div>
-
-    ${e.canManage ? `
-    <div class="card section">
+    ${admin ? `<div class="card section">
       <h3>Danger zone</h3>
-      <div class="linkrow">
-        <button class="btn small ghost" id="newLinkBtn">Change link</button><span class="small muted">The old link and QR stop working.</span>
-      </div>
-      <div class="linkrow">
-        <button class="btn small danger" id="deleteBtn">Delete event</button><span class="small muted">Deletes the folder and every photo in it. This cannot be undone.</span>
-      </div>
+      <div class="row"><button class="btn small ghost" id="newLinkBtn">Change gallery link</button><span class="small muted">The old gallery link stops working.</span></div>
+      <div class="row"><button class="btn small danger" id="deleteBtn">Delete event</button><span class="small muted">Deletes the folder and every photo. Cannot be undone.</span></div>
     </div>` : ''}`;
-
-  $('#backBtn').onclick = () => { $('#eventsView').classList.remove('detail-open'); history.replaceState(null, '', '#'); };
-  $('#copyBtn').onclick = () => copyText(e.url);
-  $('#qrBtn').onclick = () => showQr(e);
-  $('#guestToggle') && ($('#guestToggle').onchange = (x) => patch({ publicUpload: x.target.checked }));
-  $('#sampleToggle') && ($('#sampleToggle').onchange = (x) => patch({ showcase: x.target.checked }));
-  $('#newLinkBtn') && ($('#newLinkBtn').onclick = async () => { if (confirm('Make a new link? The old link and QR code will stop working.')) { await patch({ newLink: true }); toast('New link ready'); } });
-  $('#deleteBtn') && ($('#deleteBtn').onclick = () => confirmDelete(e));
-  $('#rescanBtn') && ($('#rescanBtn').onclick = async () => { const r = await api('POST', `/api/events/${e.id}/rescan`); toast(`${r.added} new file${r.added === 1 ? '' : 's'} found`); loadPhotos(); });
-  $$('[data-unassign]').forEach((b) => b.onclick = async () => {
-    await api('DELETE', `/api/events/${e.id}/members/${b.dataset.unassign}`);
-    openEvent(e.id);
-  });
-  const form = $('#addMember');
-  if (form) {
-    if (admin) api('GET', '/api/admin/users').then(({ users }) => { $('#userEmails').innerHTML = users.filter((u) => u.status === 'active').map((u) => `<option value="${esc(u.email)}">`).join(''); });
-    form.onsubmit = async (ev) => {
-      ev.preventDefault();
-      const fd = new FormData(form);
-      try { await api('POST', `/api/events/${e.id}/members`, { email: fd.get('email'), slot: fd.get('slot') || null }); openEvent(e.id); }
-      catch (err) { toast(err.message, 4000); }
-    };
-  }
+  wire(e, admin);
   loadPhotos();
 }
-const nextSlot = (members) => { const s = new Set(members.map((m) => m.slot)); let n = 1; while (s.has(n)) n++; return n; };
 
-async function patch(body) {
-  try {
-    const { event } = await api('PATCH', `/api/events/${current.event.id}`, body);
-    current.event = { ...current.event, ...event };
-    renderDetail(); loadEvents();
-  } catch (e) { toast(e.message, 4000); renderDetail(); }
+function liveControls(e, admin) {
+  const st = e.status;
+  if (st === 'live') return `<div class="row"><span>Live since ${esc(when(e.startsAt))}, until <b>${esc(when(e.endsAt))}</b></span></div>
+    <div class="row">${admin ? '<button class="btn small ghost" data-extend="1">+1 hour</button><button class="btn small ghost" data-extend="2">+2 hours</button><button class="btn small danger" id="closeBtn">Close event now</button>'
+      : '<button class="btn small danger" id="reqClose">Ask to close the event</button>'}</div>`;
+  if (st === 'scheduled') return `<div class="row"><span>Goes live at <b>${esc(when(e.startsAt))}</b>, until ${esc(when(e.endsAt))}</span>
+    ${admin ? '<button class="btn small ghost" id="closeBtn">Cancel</button>' : ''}</div>`;
+  const label = st === 'draft' ? 'Not live yet.' : `${STATUS[st]} ${esc(when(e.closedAt || e.endsAt))}. Guests can still view the gallery link; uploads are closed.`;
+  return `<p class="small muted" style="margin:0">${label}</p>
+    <div class="row"><label class="inline">Start<input class="input" type="datetime-local" id="startAt" value="${localInput(Date.now())}"></label>
+    ${admin ? '<label class="inline">Hours<input class="input" type="number" id="hours" min="1" max="24" value="8" style="width:90px"></label><button class="btn" id="goLive">Go live</button>'
+      : '<button class="btn" id="reqStart">Ask JohorStudio.com to start</button>'}</div>
+    ${admin ? '<p class="small muted" style="margin:0">Going live makes new guest and photographer codes and signs out devices from earlier sessions. Live for 8 hours unless you change it.</p>' : ''}`;
 }
 
-async function showQr(e) {
-  const src = await qrDataUrl(e.url, 8);
-  modal(`<h2>${esc(e.title)}</h2><img src="${src}" alt="QR code for the gallery" style="width:100%;max-width:320px;align-self:center;image-rendering:pixelated">
-    <div class="linkbox">${esc(e.url)}</div>
-    <div class="linkrow"><a class="btn" download="QR ${esc(e.folder)}.png" href="${src}">${icon.dl}Download QR</a><button class="btn ghost" data-close>Close</button></div>`);
+function codeCard(label, key, value, admin, help) {
+  return `<div class="code"><span class="lbl">${label}</span><span class="num">${esc(fmtCode(value))}</span>
+    <span class="small muted">${help}</span>
+    ${admin ? `<span class="acts"><button class="linkbtn" data-rand="${key}">New random</button><button class="linkbtn" data-set="${key}">Set my own</button></span>` : ''}</div>`;
+}
+
+function wire(e, admin) {
+  $('#backBtn').onclick = () => { $('#view').classList.remove('detail-open'); };
+  $('#copyLink').onclick = () => copyText(e.url);
+  $('#qrBtn').onclick = () => bigQr(e);
+  const post = async (url, body) => { try { const r = await api('POST', url, body); if (r.warning) toast(r.warning, 6000); await refresh(); } catch (err) { toast(err.message, 5000); } };
+  const startMs = () => new Date($('#startAt').value).getTime() || Date.now();
+  $('#goLive') && ($('#goLive').onclick = () => post(`/api/admin/events/${e.id}/activate`, { startsAt: startMs(), hours: Number($('#hours').value) || 8 }));
+  $$('[data-extend]').forEach((b) => b.onclick = () => post(`/api/admin/events/${e.id}/extend`, { hours: Number(b.dataset.extend) }));
+  $('#closeBtn') && ($('#closeBtn').onclick = () => confirmBox('Close the event now?', 'Guests and photographers are signed out and the guest code changes. The gallery link keeps working.', 'Close event', () => post(`/api/admin/events/${e.id}/close`)));
+  $('#reqStart') && ($('#reqStart').onclick = () => post(`/api/client/events/${e.id}/request`, { type: 'activate', startsAt: startMs() }));
+  $('#reqClose') && ($('#reqClose').onclick = () => post(`/api/client/events/${e.id}/request`, { type: 'close' }));
+  $('#reqOk') && ($('#reqOk').onclick = () => e.request.type === 'activate'
+    ? post(`/api/admin/events/${e.id}/activate`, { startsAt: Math.max(Date.now(), e.request.startsAt || 0), hours: 8 })
+    : post(`/api/admin/events/${e.id}/close`));
+  $('#reqNo') && ($('#reqNo').onclick = () => post(`/api/admin/events/${e.id}/request`, {}));
+  const patch = async (body, msg) => { try { await api('PATCH', `/api/admin/events/${e.id}`, body); if (msg) toast(msg); await refresh(); } catch (err) { toast(err.message, 5000); } };
+  $$('[data-rand]').forEach((b) => b.onclick = () => confirmBox('Make a new random code?', b.dataset.rand === 'client' ? 'The organiser needs the new code.' : 'Devices using the old code are signed out.', 'New code', () => patch({ randomCode: b.dataset.rand }, 'New code ready')));
+  $$('[data-set]').forEach((b) => b.onclick = () => {
+    const m = modal(`<h2>Set your own code</h2><div id="mb"></div><p class="error" id="me2"></p><div class="row"><button class="btn" id="ms">Save</button><button class="btn ghost" data-close>Cancel</button></div>`);
+    const bx = codeBoxes($('#mb', m.el));
+    $('#ms', m.el).onclick = async () => { try { await api('PATCH', `/api/admin/events/${e.id}`, { codes: { [b.dataset.set]: bx.get() } }); m.close(); toast('Code saved'); refresh(); } catch (err) { $('#me2', m.el).textContent = err.message; } };
+    bx.focus();
+  });
+  if (admin) {
+    $('#saveSet').onclick = () => patch({ organiser: $('#sOrg').value, hideName: $('#sHide').checked, publicUpload: $('#sUp').checked, showcase: $('#sShow').checked,
+      settings: { newSec: $('#sNew').value, loopSec: $('#sLoop').value, idleMin: $('#sIdle').value, loopSource: $('#sSrc').value } }, 'Settings saved');
+    $$('[data-slot]').forEach((s) => s.onchange = async () => { try { await api('POST', `/api/admin/events/${e.id}/slots`, { from: Number(s.dataset.slot), to: Number(s.value) }); refresh(); } catch (err) { toast(err.message, 5000); } });
+    $$('[data-kick]').forEach((b) => b.onclick = async () => { await api('DELETE', `/api/admin/events/${e.id}/devices/${b.dataset.kick}`); refresh(); });
+    $('#newLinkBtn').onclick = () => confirmBox('Change the gallery link?', 'The old link stops working.', 'Change link', () => patch({ newLink: true }, 'New link ready'));
+    $('#deleteBtn').onclick = () => confirmDelete(e);
+    $('#rescanBtn').onclick = async () => { const r = await api('POST', `/api/admin/events/${e.id}/rescan`); toast(`${r.added} new file${r.added === 1 ? '' : 's'} found`); refresh(); };
+  }
+  $$('#ptabs [data-f]').forEach((b) => b.onclick = () => { photoFilter = b.dataset.f; $$('#ptabs [data-f]').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); loadPhotos(); });
+}
+
+function confirmBox(title, text, okLabel, fn) {
+  const m = modal(`<h2>${esc(title)}</h2><p style="margin:0">${esc(text)}</p><div class="row"><button class="btn danger" id="cOk">${esc(okLabel)}</button><button class="btn ghost" data-close>Cancel</button></div>`);
+  $('#cOk', m.el).onclick = () => { m.close(); fn(); };
+}
+
+async function bigQr(e) {
+  const url = `${location.origin}/c/${e.codes.public}`;
+  const src = await qrDataUrl(url, 10);
+  modal(`<div class="qrwrap"><h2 style="margin:0">${esc(e.title)}</h2>
+    <div class="muted">Scan to send your photos, or go to <b>${esc(location.host)}</b> and enter</div>
+    <div class="big">${esc(fmtCode(e.codes.public))}</div>
+    <img src="${src}" alt="QR code that opens the event with the code filled in">
+    <div class="small muted">${esc(url)}</div>
+    <button class="btn ghost" data-close>Close</button></div>`).el.classList.add('wide');
 }
 
 function confirmDelete(e) {
-  const m = modal(`<h2>Delete event?</h2>
-    <p style="margin:0">This deletes the folder <b>${esc(e.folder)}</b> and all ${e.photoCount} photos on the server. There is no recycle bin.</p>
+  const m = modal(`<h2>Delete event?</h2><p style="margin:0">This deletes the folder <b>${esc(e.folder)}</b> and all ${e.photoCount} photos. There is no recycle bin.</p>
     <div class="field"><label for="cf">Type the event name to confirm</label><input class="input" id="cf" autocomplete="off" placeholder="${esc(e.folder)}"></div>
-    <p class="error" id="cfErr"></p>
-    <div class="linkrow"><button class="btn danger" id="cfGo" disabled>Delete for good</button><button class="btn ghost" data-close>Cancel</button></div>`);
+    <p class="error" id="cfErr"></p><div class="row"><button class="btn danger" id="cfGo" disabled>Delete for good</button><button class="btn ghost" data-close>Cancel</button></div>`);
   const inp = $('#cf', m.el);
   inp.oninput = () => { $('#cfGo', m.el).disabled = inp.value.trim() !== e.folder; };
   $('#cfGo', m.el).onclick = async () => {
-    try { await api('DELETE', `/api/events/${e.id}`, { confirm: inp.value.trim() }); m.close(); current = null; feed?.stop();
-      $('#detail').innerHTML = '<div class="card empty-state">Event deleted.</div>'; $('#eventsView').classList.remove('detail-open'); loadEvents(); }
+    try { await api('DELETE', `/api/admin/events/${e.id}`, { confirm: inp.value.trim() }); m.close(); cur = null; feed?.stop();
+      $('#detail').innerHTML = '<div class="card empty-state">Event deleted.</div>'; loadEvents(); }
     catch (err) { $('#cfErr', m.el).textContent = err.message; }
   };
 }
 
-// ---------------- photos ----------------
-const imgUrl = (p, size) => `/api/photos/${p.id}/img/${size >= 1600 ? 1600 : 480}`;
+// ---------------- photos & review ----------------
+const imgUrl = (p, size) => `${BASE}/events/${cur.event.id}/photos/${p.id}/img/${size >= 1600 ? 1600 : 480}`;
+const FLAG_NAMES = { 'nsfw': 'NSFW', 'nsfw?': 'maybe NSFW', politics: 'politics', document: 'document', text: 'lots of text', violence: 'violence', 'no people': 'no people', 'rude gesture': 'rude gesture', name: 'name', 'moderator offline': 'AI offline' };
+async function act(p, what) {
+  const id = cur.event.id;
+  try {
+    if (what === 'allow') await api('PATCH', `${BASE}/events/${id}/photos/${p.id}`, { status: 'approved', hidden: false });
+    if (what === 'hide') await api('PATCH', `${BASE}/events/${id}/photos/${p.id}`, { hidden: !p.hidden });
+    if (what === 'remove') await api('DELETE', `${BASE}/events/${id}/photos/${p.id}`);
+    toast({ allow: 'Allowed: now in the gallery', hide: p.hidden ? 'Shown in the gallery' : 'Hidden from the gallery', remove: 'Removed' }[what]);
+    refresh();
+  } catch (e) { toast(e.message, 5000); }
+}
 async function loadPhotos() {
-  const e = current.event;
-  grid = new PhotoGrid($('#grid'), {
-    urlFor: imgUrl,
-    onTile: (p, list) => {
-      const lb = openLightbox(list, p, {
-        urlFor: imgUrl, downloadUrl: (x) => `/api/photos/${x.id}/img/orig?dl=1`,
-        actions: (x) => e.canManage ? `<button class="btn small light" data-hide="${x.id}">${x.hidden ? 'Show' : 'Hide'}</button><button class="btn small danger" data-del="${x.id}">Delete</button>` : '',
+  const e = cur.event;
+  const { photos } = await api('GET', `${BASE}/events/${e.id}/photos?filter=${photoFilter}`);
+  const el = $('#plist');
+  if (!photos.length) { el.innerHTML = `<div class="empty-state">${photoFilter === 'review' ? 'Nothing to review. Guest photos that the AI is unsure about appear here.' : 'No photos here.'}</div>`; }
+  else if (photoFilter === 'review' || photoFilter === 'blocked') {
+    el.innerHTML = `<div class="rlist">${photos.map((p) => `<div class="rcard" data-id="${p.id}">
+      <img alt="" loading="lazy" src="${esc(imgUrl(p, 480))}">
+      <div class="rb"><div class="flags">${p.status === 'pending' ? '<span class="pill">checking…</span>' : ''}${p.flags.map((f) => `<span class="pill red">${esc(FLAG_NAMES[f] || f)}</span>`).join('')}</div>
+        <div class="small muted">${p.by ? 'by ' + esc(p.by) + ' · ' : ''}${p.src === 'public' ? 'guest' : 'photographer'}</div>
+        <div class="row"><button class="btn small" data-a="allow">Allow</button><button class="btn small danger" data-a="remove">Remove</button></div></div></div>`).join('')}</div>`;
+    $$('.rcard', el).forEach((c) => {
+      const p = photos.find((x) => x.id === c.dataset.id);
+      $$('[data-a]', c).forEach((b) => b.onclick = () => act(p, b.dataset.a));
+      $('img', c).onclick = () => openLightbox(photos, p, { urlFor: imgUrl, downloadUrl: (x) => `${BASE}/events/${e.id}/photos/${x.id}/img/orig?dl=1` });
+    });
+  } else {
+    el.innerHTML = '<div class="jgrid" id="grid"></div>';
+    grid = new PhotoGrid($('#grid'), { urlFor: imgUrl, onTile: (p, list) => {
+      const lb = openLightbox(list, p, { urlFor: imgUrl, downloadUrl: (x) => `${BASE}/events/${e.id}/photos/${x.id}/img/orig?dl=1`,
+        actions: (x) => `<button class="btn small light" data-lh>${x.hidden ? 'Show' : 'Hide'}</button><button class="btn small danger" data-lr>Remove</button>` });
+      document.querySelector('.lightbox').addEventListener('click', (ev) => {
+        if (ev.target.closest('[data-lh]')) { act(lb.current(), 'hide'); lb.close(); }
+        if (ev.target.closest('[data-lr]')) { act(lb.current(), 'remove'); lb.close(); }
       });
-      document.querySelector('.lightbox').addEventListener('click', async (ev) => {
-        const h = ev.target.closest('[data-hide]'), d = ev.target.closest('[data-del]');
-        if (h) { const x = lb.current(); const { photo } = await api('PATCH', `/api/photos/${x.id}`, { hidden: !x.hidden }); Object.assign(x, photo); grid.update(photo); lb.refresh(); toast(photo.hidden ? 'Hidden from the gallery' : 'Shown in the gallery'); }
-        if (d) { const x = lb.current(); if (!confirm('Delete this photo for good?')) return; await api('DELETE', `/api/photos/${x.id}`); grid.remove(x.id); lb.close(); toast('Deleted'); }
-      });
-    },
-  });
-  const { photos } = await api('GET', `/api/events/${e.id}/photos`);
-  grid.set(photos);
-  $('#gridEmpty').classList.toggle('hidden', photos.length > 0);
-  $('#moreBtn').classList.toggle('hidden', photos.length < 120);
-  $('#moreBtn').onclick = async () => {
-    const more = (await api('GET', `/api/events/${e.id}/photos?before=${grid.minSeq()}`)).photos;
-    grid.append(more); if (more.length < 120) $('#moreBtn').classList.add('hidden');
-  };
+    } });
+    grid.set(photos);
+  }
   feed?.stop();
-  feed = liveFeed({
-    streamUrl: `/api/e/${e.token}/stream`, pollUrl: `/api/events/${e.id}/photos`, getCursor: () => grid.maxSeq(),
-    onPhoto: (p) => { grid.addLive(p); $('#gridEmpty').classList.add('hidden'); },
-    onRemove: (id) => grid.remove(id),
-  });
-  if (e.canManage) makeMissingThumbs(e);
+  feed = liveFeed({ streamUrl: `${BASE}/events/${e.id}/stream`, pollUrl: `${BASE}/events/${e.id}/photos`, getCursor: () => Math.max(0, ...photos.map((p) => p.seq)),
+    onPhoto: () => scheduleRefresh(), onRemove: () => scheduleRefresh() });
+  if (!PANEL) makeMissingThumbs(e);
+}
+let refreshTimer;
+function scheduleRefresh() { clearTimeout(refreshTimer); refreshTimer = setTimeout(async () => { cur = await api('GET', `${BASE}/events/${cur.event.id}`); updateCounts(); loadPhotos(); }, 1500); }
+function updateCounts() {
+  const e = cur.event;
+  const labels = { review: `To review (${e.reviewCount})`, all: `All (${e.photoCount})`, blocked: `Blocked (${e.blockedCount})` };
+  $$('#ptabs [data-f]').forEach((b) => { if (labels[b.dataset.f]) b.textContent = labels[b.dataset.f]; });
 }
 
 // Photos copied in over SMB have no thumbnails: this browser makes them (480 + 1600 px).
 let thumbJob = 0;
 async function makeMissingThumbs(e) {
   const job = ++thumbJob;
-  const { photos } = await api('GET', `/api/events/${e.id}/missing-thumbs`);
+  const { photos } = await api('GET', `/api/admin/events/${e.id}/missing-thumbs`);
   if (!photos.length) return;
   const { decode, thumbnail } = await import('/js/encode.js');
   let done = 0;
@@ -294,12 +379,12 @@ async function makeMissingThumbs(e) {
     if (job !== thumbJob) return;
     $('#thumbNote') && ($('#thumbNote').textContent = `Making previews ${done + 1}/${photos.length}…`);
     try {
-      const blob = await (await fetch(`/api/photos/${p.id}/img/orig`)).blob();
+      const blob = await (await fetch(`/api/admin/events/${e.id}/photos/${p.id}/img/orig`)).blob();
       const src = await decode(blob);
       const big = await thumbnail(src, 1600); const small = await thumbnail(big.canvas, 480);
       src.close?.();
-      await api('PUT', `/api/photos/${p.id}/thumb/1600`, big.blob);
-      await api('PUT', `/api/photos/${p.id}/thumb/480`, small.blob);
+      await api('PUT', `/api/admin/events/${e.id}/photos/${p.id}/thumb/1600`, big.blob);
+      await api('PUT', `/api/admin/events/${e.id}/photos/${p.id}/thumb/480`, small.blob);
     } catch (err) { console.warn('thumb', p.id, err); }
     done++;
   }
@@ -311,48 +396,22 @@ $('#newBtn').onclick = () => {
   const m = modal(`<h2>New event</h2>
     <form id="nf" style="display:flex;flex-direction:column;gap:12px">
       <div class="field"><label for="nd">Date</label><input class="input" id="nd" type="date" required value="${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6)}"></div>
-      <div class="field"><label for="nt">Event name</label><input class="input" id="nt" required maxlength="80" placeholder="Konvo Tadika Bandar Putra"></div>
-      <p class="small muted" style="margin:0" id="np"></p>
+      <div class="field"><label for="nt">Event name</label><input class="input" id="nt" required maxlength="80" placeholder="Annual Dinner ABC Sdn Bhd"></div>
+      <div class="field"><label for="no">Organiser <span class="muted">(optional, shown in the photo notice)</span></label><input class="input" id="no" maxlength="80"></div>
       <p class="error" id="nerr"></p>
-      <div class="linkrow"><button class="btn">Create</button><button type="button" class="btn ghost" data-close>Cancel</button></div>
+      <div class="row"><button class="btn">Create</button><button type="button" class="btn ghost" data-close>Cancel</button></div>
     </form>`);
-  const prev = () => { $('#np', m.el).textContent = `Folder: EVENTS/${$('#nd', m.el).value.replace(/-/g, '')} ${$('#nt', m.el).value.trim()}`; };
-  $('#nd', m.el).oninput = prev; $('#nt', m.el).oninput = prev; prev();
   $('#nt', m.el).focus();
   $('#nf', m.el).onsubmit = async (ev) => {
     ev.preventDefault();
     try {
-      const { event } = await api('POST', '/api/events', { date: $('#nd', m.el).value.replace(/-/g, ''), title: $('#nt', m.el).value });
-      m.close(); await loadEvents(event.id); toast('Event created');
+      const { event } = await api('POST', '/api/admin/events', { date: $('#nd', m.el).value.replace(/-/g, ''), title: $('#nt', m.el).value, organiser: $('#no', m.el).value });
+      m.close(); await loadEvents(event.id); toast('Event created. Set the start time and press Go live.');
     } catch (err) { $('#nerr', m.el).textContent = err.message; }
   };
 };
 
-// ---------------- users ----------------
-async function loadUsers() {
-  const { users } = await api('GET', '/api/admin/users');
-  $('#ulist').innerHTML = users.map((u) => `
-    <div class="urow">
-      <div style="min-width:0;overflow-wrap:anywhere"><b>${esc(u.email)}</b>${u.name ? ` · ${esc(u.name)}` : ''}
-        <div class="small muted">${u.role === 'admin' ? 'Admin' : 'User'} · ${u.eventCount} event${u.eventCount === 1 ? '' : 's'}${u.lastLoginAt ? ' · last login ' + ago(u.lastLoginAt) : ' · never logged in'}</div></div>
-      ${u.status === 'removed'
-        ? `<span style="display:flex;gap:8px;align-items:center"><span class="pill red">Removed · folders kept</span><button class="btn small ghost" data-restore="${u.id}">Restore</button></span>`
-        : u.id === me.id ? '<span class="pill teal">You</span>' : `<button class="btn small ghost" data-remove="${u.id}">Remove access</button>`}
-    </div>`).join('');
-  $$('[data-remove]').forEach((b) => b.onclick = async () => {
-    if (!confirm('Remove access? Their events and folders stay.')) return;
-    try { await api('PATCH', `/api/admin/users/${b.dataset.remove}`, { status: 'removed' }); loadUsers(); } catch (e) { toast(e.message, 4000); }
-  });
-  $$('[data-restore]').forEach((b) => b.onclick = async () => { await api('PATCH', `/api/admin/users/${b.dataset.restore}`, { status: 'active' }); loadUsers(); });
-}
-$('#addUser').onsubmit = async (ev) => {
-  ev.preventDefault();
-  const f = new FormData(ev.target);
-  try { await api('POST', '/api/admin/users', Object.fromEntries(f)); ev.target.reset(); loadUsers(); toast('User added'); }
-  catch (e) { toast(e.message, 4000); }
-};
-
-loadEvents();
+start();
 </script>
 </body>
 </html>

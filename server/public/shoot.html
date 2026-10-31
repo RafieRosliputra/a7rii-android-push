@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#20272b">
+<title>Photographer · JohorStudio.com Live</title>
+<link rel="icon" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/site.css">
+<style>
+  body { min-height: 100vh; display: flex; flex-direction: column; }
+  .box { width: 100%; max-width: 440px; margin: 32px auto; padding: 24px; display: flex; flex-direction: column; gap: 14px; }
+  .box h1 { margin: 0; font-size: 24px; font-stretch: 85%; }
+  .slot { display: flex; align-items: baseline; gap: 10px; }
+  .slot b { font-size: 28px; font-stretch: 80%; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 14px; }
+  .kv dt { color: var(--steel); }
+  .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .app-btn { background: var(--graphite); }
+</style>
+</head>
+<body>
+<header class="topbar"><div class="wrap"><a class="brand" href="/"><span class="brand-name">JohorStudio.com</span><span class="live-badge">LIVE</span></a></div></header>
+<div class="wrap" style="flex:1">
+  <div class="card box" id="signin">
+    <div><h1>Photographer</h1><p class="muted small" style="margin:6px 0 0">Enter the photographer code from the admin, and your name.</p></div>
+    <div id="boxes"></div>
+    <div class="field"><label for="nm">Your name</label><input class="input" id="nm" maxlength="30" autocomplete="name" placeholder="e.g. Aiman"></div>
+    <p class="error" id="err" role="alert"></p>
+    <button class="btn" id="go">Sign in</button>
+    <details class="help"><summary>Where do I get this code?</summary><p>The photographer code is different from the guest code. Ask the JohorStudio.com admin or the event organiser.</p></details>
+  </div>
+
+  <div class="card box hidden" id="ready">
+    <div class="small muted" id="evDate"></div>
+    <h1 id="evTitle"></h1>
+    <div class="slot"><b id="slot"></b><span class="muted" id="who"></span></div>
+    <dl class="kv">
+      <dt>Folder</dt><dd id="folder"></dd>
+      <dt>Live until</dt><dd id="until"></dd>
+      <dt>Gallery</dt><dd><a id="gallery" target="_blank" rel="noopener"></a></dd>
+    </dl>
+    <a class="btn app-btn hidden" id="appBtn">Return to app</a>
+    <button class="btn" id="up">Upload photos from this phone</button>
+    <div class="hidden" id="prog" style="display:flex;flex-direction:column;gap:6px">
+      <div class="progress"><div id="bar"></div></div><div class="small muted" id="step"></div>
+    </div>
+    <p class="small muted" style="margin:0">Photos from the JS Tether app or this page go straight to the gallery (no review). Keep this page open until uploads finish.</p>
+    <button class="btn ghost small" id="out" style="align-self:flex-start">Sign out</button>
+  </div>
+</div>
+<input type="file" id="picker" accept="image/*" multiple hidden>
+
+<script type="module">
+import { $, api, toast, fmtDate } from '/js/common.js';
+import { codeBoxes, sendCode } from '/js/codebox.js';
+
+const params = new URLSearchParams(location.search);
+const fromApp = params.get('app') === '1';
+let appToken = null;
+try { appToken = sessionStorage.getItem('lp-app-token'); } catch {}
+
+const boxes = codeBoxes($('#boxes'), { onComplete: () => { if ($('#nm').value.trim()) go(); else $('#nm').focus(); } });
+try { $('#nm').value = localStorage.getItem('lp-photog-name') || ''; } catch {}
+$('#go').onclick = go;
+$('#nm').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+
+async function go() {
+  $('#err').textContent = '';
+  const name = $('#nm').value.trim();
+  if (boxes.get().length !== 6) { $('#err').textContent = 'Enter all 6 digits.'; return; }
+  if (!name) { $('#err').textContent = 'Type your name.'; $('#nm').focus(); return; }
+  try {
+    const r = await sendCode(boxes.get(), { want: 'photographer', name, app: fromApp });
+    try { localStorage.setItem('lp-photog-name', name); if (r.token) sessionStorage.setItem('lp-app-token', r.token); } catch {}
+    appToken = r.token || appToken;
+    show();
+  } catch (e) { if (e.status === 401) boxes.clear(); $('#err').textContent = e.message; boxes.shake(); }
+}
+
+async function show() {
+  let me;
+  try { me = await api('GET', '/api/shoot'); } catch { $('#signin').classList.remove('hidden'); $('#ready').classList.add('hidden'); boxes.focus(); return; }
+  $('#signin').classList.add('hidden'); $('#ready').classList.remove('hidden');
+  $('#evTitle').textContent = me.event.title;
+  $('#evDate').textContent = fmtDate(me.event.date);
+  $('#slot').textContent = `Photographer ${me.slot}`;
+  $('#who').textContent = me.name;
+  $('#folder').textContent = `EVENTS / … / ${me.folder}`;
+  $('#until').textContent = new Date(me.event.endsAt).toLocaleString('en-GB', { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  $('#gallery').href = me.event.url; $('#gallery').textContent = me.event.url.replace(/^https?:\/\//, '');
+  // Back to JS Tether with the session token (only when the app opened this page).
+  if (fromApp && appToken) { $('#appBtn').classList.remove('hidden'); $('#appBtn').href = `jstether://auth?token=${encodeURIComponent(appToken)}`; }
+}
+$('#out').onclick = async () => { await api('POST', '/auth/logout', { role: 'photographer' }); try { sessionStorage.removeItem('lp-app-token'); } catch {} location.reload(); };
+
+// Web upload: full-resolution WebP 80% (photographer quality), straight to Photographer N.
+let busy = false;
+window.addEventListener('beforeunload', (e) => { if (busy) { e.preventDefault(); e.returnValue = ''; } });
+$('#up').onclick = () => { if (!busy) $('#picker').click(); };
+$('#picker').onchange = async (e) => {
+  const files = [...e.target.files]; e.target.value = '';
+  if (!files.length) return;
+  busy = true; $('#prog').classList.remove('hidden'); $('#up').disabled = true;
+  const { preparePhoto } = await import('/js/encode.js');
+  const { uploadPhoto } = await import('/js/upload.js');
+  let ok = 0;
+  for (let i = 0; i < files.length; i++) {
+    const set = (f, t) => { $('#bar').style.width = `${((i + f) / files.length) * 100}%`; if (t) $('#step').textContent = t; };
+    try {
+      set(0, `${i + 1}/${files.length} · converting ${files[i].name}`);
+      const out = await preparePhoto(files[i], 0.8);
+      set(0.3, `${i + 1}/${files.length} · uploading`);
+      await uploadPhoto({ startUrl: '/api/shoot/uploads', startBody: { name: files[i].name.replace(/\.[^.]+$/, '') + '.webp' }, blob: out.blob, thumbs: out.thumbs, onProgress: (x) => set(0.3 + 0.7 * x) });
+      ok++;
+    } catch (err) { toast(`${files[i].name}: ${err.message}`, 4000); if (err.status === 401) break; }
+  }
+  busy = false; $('#up').disabled = false;
+  $('#bar').style.width = '100%'; $('#step').textContent = `${ok} of ${files.length} uploaded`;
+};
+
+show();
+</script>
+</body>
+</html>

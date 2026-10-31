@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Big screen · JohorStudio.com Live</title>
+<link rel="icon" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" rel="stylesheet">
+<style>
+  /* Big screen (LED / projector): always dark, designed 16:9, works in portrait. */
+  :root { --bg: #0d1113; --ink: #f5f7f7; --muted: #9fb0b2; --teal: #6cc4b9; --tally: #e0564e; --bar: rgba(13,17,19,.82); color-scheme: dark;
+    --font: Archivo, system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--font); overflow: hidden; }
+  .stage { position: fixed; inset: 0; }
+  .bgblur { position: absolute; inset: -40px; background-size: cover; background-position: center; filter: blur(40px) brightness(.45) saturate(1.1); transition: background-image .8s; }
+  .loop { position: absolute; inset: 0 0 12vh 0; display: flex; align-items: center; justify-content: center; padding: 3vh 3vw; }
+  .loop img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; box-shadow: 0 20px 60px rgba(0,0,0,.5); opacity: 0; transition: opacity .9s; }
+  .loop img.on { opacity: 1; }
+  /* New photo: slides in from the side, about half the screen, over the loop. */
+  .newcard { position: absolute; top: 50%; left: 50%; max-width: 54vw; transform: translate(60vw, -55%) rotate(4deg); transition: transform .7s cubic-bezier(.2,.8,.2,1);
+    background: #fff; padding: 1vw 1vw 0.6vw; border-radius: 10px; box-shadow: 0 30px 90px rgba(0,0,0,.6); display: flex; flex-direction: column; gap: .5vw; z-index: 5; }
+  .newcard.in { transform: translate(-50%, -55%) rotate(-1.5deg); }
+  .newcard.out { transform: translate(-160vw, -55%) rotate(-6deg); }
+  .newcard img { display: block; width: auto; max-width: 52vw; max-height: 64vh; border-radius: 4px; }
+  .newcard .cap { display: flex; justify-content: space-between; align-items: center; color: #1d2528; font-size: clamp(14px, 1.5vw, 28px); font-weight: 600; }
+  .newcard .tag { background: var(--tally); color: #fff; font-weight: 800; letter-spacing: .1em; padding: .2em .6em; border-radius: 4px; font-size: .8em; }
+  .portrait .newcard { max-width: 84vw; } .portrait .newcard img { max-width: 80vw; max-height: 56vh; }
+  footer { position: absolute; left: 0; right: 0; bottom: 0; height: 12vh; background: var(--bar); display: flex; align-items: center; justify-content: center; gap: 2.4vw;
+    font-size: clamp(16px, 2.6vw, 54px); font-weight: 600; letter-spacing: .01em; padding: 0 3vw; z-index: 6; white-space: nowrap; }
+  footer .url { color: var(--teal); font-weight: 800; }
+  footer .code { font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: .08em; color: #fff; background: var(--tally); padding: .1em .45em; border-radius: .25em; }
+  footer .dot { color: var(--muted); }
+  .portrait footer { flex-wrap: wrap; white-space: normal; gap: 0 3vw; font-size: clamp(16px, 4vw, 54px); text-align: center; }
+  .bubble { position: absolute; left: 50%; bottom: 15vh; transform: translateX(-50%); background: var(--tally); color: #fff; font-weight: 800; font-size: clamp(22px, 4.2vw, 90px);
+    padding: .35em .9em; border-radius: 999px; box-shadow: 0 10px 50px rgba(224,86,78,.55); z-index: 7; white-space: nowrap; }
+  @media (prefers-reduced-motion: no-preference) { .bubble { animation: bob 1.4s ease-in-out infinite; } }
+  @keyframes bob { 0%, 100% { transform: translateX(-50%) scale(.9); } 50% { transform: translateX(-50%) scale(1.08); } }
+  .empty { position: absolute; inset: 0 0 12vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2vh; text-align: center; padding: 4vw; }
+  .empty h1 { margin: 0; font-size: clamp(28px, 5vw, 110px); font-stretch: 80%; }
+  .empty p { margin: 0; color: var(--muted); font-size: clamp(16px, 2vw, 44px); }
+  .controls { position: absolute; top: 12px; right: 12px; z-index: 9; display: flex; gap: 8px; transition: opacity .4s; }
+  .controls button { background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.25); border-radius: 8px; padding: 8px 12px; font: 600 14px var(--font); cursor: pointer; }
+  body.idle-mouse .controls { opacity: 0; }
+  body.idle-mouse { cursor: none; }
+  .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 20px; font-size: 20px; z-index: 20; background: var(--bg); }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="bgblur" id="bg"></div>
+  <div class="loop"><img id="loopImg" alt=""></div>
+  <div class="empty hidden" id="empty"><h1 id="emptyTitle">Photos will appear here</h1><p>Take a photo and send it to the live gallery.</p></div>
+  <div class="bubble hidden" id="bubble">Upload your photos!</div>
+  <footer id="foot"><span>Upload photo here</span><span class="dot">·</span><span class="url" id="url">live.johorstudio.com</span><span class="dot">·</span><span>Code <span class="code" id="code">— —</span></span></footer>
+</div>
+<div class="controls" id="controls"><button id="fsBtn" type="button">Full screen</button></div>
+<div class="msg hidden" id="msg"></div>
+
+<script type="module">
+const $ = (s) => document.querySelector(s);
+const eventId = location.pathname.split('/')[2];
+let base = null; // '/api/admin' or '/api/client'
+let settings = { newSec: 3, loopSec: 5, loopSource: 'all', idleMin: 3 };
+let loop = [], idx = -1, queue = [], showingNew = false, lastNewAt = Date.now(), loopTimer = null;
+const seen = new Set();
+
+const img = (p, size = 1600) => `${base}/events/${eventId}/photos/${p.id}/img/${size}`;
+const fits = (p) => p.status === 'approved' && !p.hidden && (settings.loopSource === 'all' || (settings.loopSource === 'public' ? p.src === 'public' : p.src !== 'public'));
+const fmtCode = (c) => c ? `${c.slice(0, 3)} ${c.slice(3)}` : '— —';
+
+function fail(text) { $('#msg').textContent = text; $('#msg').classList.remove('hidden'); }
+
+async function get(url) {
+  const r = await fetch(url, { credentials: 'same-origin' });
+  if (!r.ok) { const e = new Error((await r.json().catch(() => ({}))).error || r.status); e.status = r.status; throw e; }
+  return r.json();
+}
+
+async function boot() {
+  let info;
+  for (const b of ['/api/client', '/api/admin']) {
+    try { info = await get(`${b}/events/${eventId}`); base = b; break; } catch { /* try next */ }
+  }
+  if (!info) return fail('Open this screen from the admin or organiser panel.');
+  applyEvent(info.event);
+  // all approved, visible photos (oldest first for the loop)
+  let all = [], before = null;
+  for (let i = 0; i < 20; i++) {
+    const q = new URLSearchParams({ filter: 'visible' }); if (before) q.set('before', before);
+    const page = (await get(`${base}/events/${eventId}/photos?${q}`)).photos;
+    all.push(...page);
+    if (page.length < 120) break;
+    before = Math.min(...page.map((p) => p.seq));
+  }
+  all.forEach((p) => seen.add(p.id));
+  loop = all.sort((a, b) => a.seq - b.seq);
+  rebuildLoop();
+  next();
+  connect();
+  setInterval(idleCheck, 5000);
+}
+
+function applyEvent(ev) {
+  settings = { ...settings, ...ev.settings };
+  $('#code').textContent = fmtCode(ev.codes?.public);
+  $('#url').textContent = (ev.url || '').replace(/^https?:\/\//, '').split('/')[0] || 'live.johorstudio.com';
+  $('#emptyTitle').textContent = ev.title ? `${ev.title}` : 'Photos will appear here';
+  document.title = `${ev.title} · Big screen`;
+}
+let loopList = [];
+function rebuildLoop() {
+  loopList = loop.filter(fits);
+  $('#empty').classList.toggle('hidden', loopList.length > 0 || showingNew);
+}
+
+function setBg(url) { $('#bg').style.backgroundImage = `url("${url}")`; }
+
+// Loop: one photo every loopSec; new photos interrupt, then the loop carries on where it was.
+function next() {
+  clearTimeout(loopTimer);
+  if (queue.length) return showNew();
+  if (!loopList.length) { loopTimer = setTimeout(next, 2000); return; }
+  idx = (idx + 1) % loopList.length;
+  const p = loopList[idx];
+  const el = $('#loopImg');
+  const pre = new Image();
+  pre.onload = pre.onerror = () => {
+    el.classList.remove('on');
+    setTimeout(() => { el.src = pre.src; el.classList.add('on'); setBg(img(p, 480)); }, 250);
+    loopTimer = setTimeout(next, settings.loopSec * 1000);
+  };
+  pre.src = img(p);
+}
+
+function showNew() {
+  const p = queue.shift();
+  showingNew = true;
+  $('#empty').classList.add('hidden');
+  const card = document.createElement('div');
+  card.className = 'newcard';
+  card.innerHTML = `<img alt=""><div class="cap"><span class="tag">NEW</span><span class="who"></span></div>`;
+  card.querySelector('.who').textContent = p.by ? `by ${p.by}` : (p.src === 'public' ? 'from a guest' : 'from the photographer');
+  const pic = card.querySelector('img');
+  const go = () => {
+    $('#stage').appendChild(card);
+    setBg(img(p, 480));
+    requestAnimationFrame(() => requestAnimationFrame(() => card.classList.add('in')));
+    setTimeout(() => {
+      card.classList.add('out');
+      setTimeout(() => { card.remove(); showingNew = false; rebuildLoop(); next(); }, 700);
+    }, settings.newSec * 1000 + 700);
+  };
+  pic.onload = go; pic.onerror = go;
+  pic.src = img(p);
+}
+
+function addPhoto(p) {
+  if (seen.has(p.id)) {
+    const i = loop.findIndex((x) => x.id === p.id);
+    if (i >= 0) { loop[i] = { ...loop[i], ...p }; rebuildLoop(); }
+    if (i >= 0 || !fits(p)) return;
+  }
+  if (!fits(p)) return; // pending/flagged: wait for the "approved" update
+  seen.add(p.id);
+  loop.push(p);
+  queue.push(p);
+  lastNewAt = Date.now();
+  $('#bubble').classList.add('hidden');
+  if (!showingNew) next();
+}
+function removePhoto(id) {
+  loop = loop.filter((p) => p.id !== id);
+  queue = queue.filter((p) => p.id !== id);
+  const cur = loopList[idx];
+  rebuildLoop();
+  if (cur) idx = Math.max(-1, loopList.findIndex((p) => p.id === cur.id) - (cur.id === id ? 1 : 0));
+}
+
+function idleCheck() {
+  const idle = Date.now() - lastNewAt > settings.idleMin * 60e3;
+  $('#bubble').classList.toggle('hidden', !idle);
+}
+
+function connect() {
+  const es = new EventSource(`${base}/events/${eventId}/stream`);
+  es.addEventListener('photo', (e) => addPhoto(JSON.parse(e.data)));
+  es.addEventListener('remove', (e) => removePhoto(JSON.parse(e.data).id));
+  es.addEventListener('settings', (e) => { const d = JSON.parse(e.data); settings = { ...settings, ...d.settings }; if (d.code) $('#code').textContent = fmtCode(d.code); rebuildLoop(); });
+  es.onerror = () => { if (es.readyState === EventSource.CLOSED) setTimeout(connect, 5000); };
+  // refresh event info (code may change on a new live window) every minute
+  setInterval(async () => { try { applyEvent((await get(`${base}/events/${eventId}`)).event); rebuildLoop(); } catch { /* keep going */ } }, 60000);
+}
+
+// Full screen + keep the screen awake + hide the cursor/controls when idle.
+$('#fsBtn').onclick = () => { (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {}); };
+document.addEventListener('keydown', (e) => { if (e.key === 'f' || e.key === 'F') $('#fsBtn').click(); });
+document.addEventListener('fullscreenchange', () => { $('#fsBtn').textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen'; });
+let wake = null;
+async function keepAwake() { try { wake = await navigator.wakeLock?.request('screen'); } catch { /* not allowed */ } }
+document.addEventListener('visibilitychange', () => { if (!document.hidden) keepAwake(); });
+keepAwake();
+let mouseTimer;
+document.addEventListener('mousemove', () => { document.body.classList.remove('idle-mouse'); clearTimeout(mouseTimer); mouseTimer = setTimeout(() => document.body.classList.add('idle-mouse'), 3000); });
+const orient = () => document.body.classList.toggle('portrait', innerHeight > innerWidth);
+addEventListener('resize', orient); orient();
+
+boot().catch((e) => fail(`Could not start the big screen: ${e.message}`));
+</script>
+</body>
+</html>
