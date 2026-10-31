@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ms">
+<head>
+<meta charset="utf-8">
+<title>Client — upload gambar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; font-family: Archivo, system-ui, sans-serif; background: #4f5659; color: #1d2528; position: relative; overflow: hidden;">
+  <div style="position: absolute; left: 0; right: 0; top: 0; padding: 14px 16px; background: #20272b; color: #9aa8a6; font-size: 15px;">Konvo Tadika Bandar Putra</div>
+
+  <div role="dialog" aria-labelledby="up-title" style="position: absolute; left: 0; right: 0; bottom: 0; background: #ffffff; border-radius: 18px 18px 0 0; padding: 20px 20px 28px; display: flex; flex-direction: column; gap: 16px;">
+    <div style="width: 40px; height: 4px; border-radius: 2px; background: #c9d3d2; align-self: center;"></div>
+    <h2 id="up-title" style="margin: 0; font-size: 22px; font-stretch: 85%;">Upload gambar anda</h2>
+    <p style="margin: 0; font-size: 15px; line-height: 1.5; color: #5b676b;">Gambar anda akan masuk ke galeri event ini (folder <b style="color: #1d2528;">public upload</b>). Gambar dikecilkan dalam telefon anda dahulu supaya upload laju.</p>
+
+    <div style="background: #fdf1e6; border: 1px solid #e9c39a; border-radius: 10px; padding: 12px; font-size: 14px; line-height: 1.45; color: #6b3f12; font-weight: 600;">Jangan tutup halaman ini sehingga upload selesai.</div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <div style="display: flex; justify-content: space-between; font-size: 14px;">
+        <span style="font-weight: 700;">7 daripada 12 gambar</span><span style="color: #5b676b;">58%</span>
+      </div>
+      <div style="height: 10px; background: #e2e8e9; border-radius: 5px;"><div style="width: 58%; height: 10px; background: #1f6f68; border-radius: 5px;"></div></div>
+      <div style="font-size: 13px; color: #5b676b;">IMG_2231.jpg · tukar ke WebP… 4.8 MB → 0.9 MB</div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px;">
+      <div style="aspect-ratio: 1; background: #b3c0bf; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; font-weight: 700;">✓</div>
+      <div style="aspect-ratio: 1; background: #b3c0bf; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; font-weight: 700;">✓</div>
+      <div style="aspect-ratio: 1; background: #b3c0bf; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; font-weight: 700;">✓</div>
+      <div style="aspect-ratio: 1; background: #b3c0bf; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; font-weight: 700;">✓</div>
+      <div style="aspect-ratio: 1; background: #b3c0bf; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; font-weight: 700;">✓</div>
+      <div style="aspect-ratio: 1; background: #b3c0bf; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; font-weight: 700;">✓</div>
+      <div style="aspect-ratio: 1; background: #6cc4b9; border-radius: 4px; outline: 2px solid #1f6f68; outline-offset: -2px;"></div>
+      <div style="aspect-ratio: 1; background: #e2e8e9; border-radius: 4px;"></div>
+      <div style="aspect-ratio: 1; background: #e2e8e9; border-radius: 4px;"></div>
+      <div style="aspect-ratio: 1; background: #e2e8e9; border-radius: 4px;"></div>
+      <div style="aspect-ratio: 1; background: #e2e8e9; border-radius: 4px;"></div>
+      <div style="aspect-ratio: 1; background: #e2e8e9; border-radius: 4px;"></div>
+    </div>
+
+    <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #5b676b;">Nama anda (pilihan)
+      <input type="text" value="Keluarga Hakim" style="font: inherit; font-size: 16px; padding: 12px; border: 1px solid #c9d3d2; border-radius: 8px; color: #1d2528;">
+    </label>
+
+    <div style="display: flex; gap: 10px;">
+      <button type="button" style="flex: 1; height: 50px; font: inherit; font-weight: 600; border-radius: 10px; border: 1px solid #c9d3d2; background: #fff; color: #1d2528;">Batal</button>
+      <button type="button" style="flex: 2; height: 50px; font: inherit; font-weight: 700; border-radius: 10px; border: 0; background: #1f6f68; color: #fff;">+ Tambah gambar</button>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

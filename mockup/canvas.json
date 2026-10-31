@@ -1,0 +1,21 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-10-31T14:40:00Z"},
+  "title": "Live Photo v3 — Mockup",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 1280, "h": 2240, "title": "Website · Landing page (live.johorstudio.com)", "expand": "fill"},
+    "Admin.dc.html": {"x": 1360, "y": 0, "w": 1280, "h": 1000, "title": "Admin · Event & pengguna (web)", "expand": "fill"},
+    "AppEvents.dc.html": {"x": 1360, "y": 1343, "w": 390, "h": 844, "title": "App user · Senarai EVENTS"},
+    "AppLive.dc.html": {"x": 1830, "y": 1343, "w": 390, "h": 844, "title": "App user · Tether live"},
+    "ClientGallery.dc.html": {"x": 2300, "y": 1343, "w": 390, "h": 844, "title": "Client · Galeri live (tiled)"},
+    "ClientUpload.dc.html": {"x": 2770, "y": 1343, "w": 390, "h": 844, "title": "Client · Upload gambar"}
+  },
+  "order": ["Main.dc.html", "Admin.dc.html", "AppEvents.dc.html", "AppLive.dc.html", "ClientGallery.dc.html", "ClientUpload.dc.html"],
+  "notes": {
+    "t_web": {"x": 0, "y": -300, "text": "Website & admin (web)", "kind": "title1", "maxW": 2640},
+    "t_phone": {"x": 1360, "y": 1080, "text": "Phone: app user & client", "kind": "title1", "maxW": 1800}
+  },
+  "designSystems": []
+}
