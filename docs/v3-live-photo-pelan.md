@@ -161,7 +161,7 @@ Arahan #15 ("kalau takda folder, maksudnya tiada fail") dan #17 (admin ubah mela
 - **Senarai dibenarkan (allowlist):** hanya email yang admin masukkan boleh login. Login Google dengan email lain ditolak (arahan #11).
 - **Dua cara login, satu identiti (email):**
   1. **Google Sign-In.** Server sahkan ID token Google, kemudian email mesti ada dalam allowlist dan status aktif.
-  2. **Kod email 6 digit.** Kod sah 10 minit, maksimum 5 cubaan, had kadar per email/IP. Dihantar dari **noreply@johorstudio.com melalui Mailjet** (domain penghantar `email.johorstudio.com`), sama ada melalui SMTP Mailjet atau API Mailjet dengan API key/secret.
+  2. **Kod email 6 digit.** Kod sah 10 minit, maksimum 5 cubaan, had kadar per email/IP. Dihantar melalui servis **JohorStudio Mail** sedia ada (repo `johorstudio-mail`, di m10): `POST http://192.168.0.100:8140/api/v1/send` dengan Bearer key app `livephoto` dan template terbina **`login_code`** (`{code, minutes, name}`). Servis itu yang hantar melalui Mailjet (fallback Gmail) dari `noreply@johorstudio.com`. Live photo **tidak** bercakap terus dengan Mailjet.
 - **Sesi 30 hari** (arahan #12): cookie `HttpOnly; Secure` untuk web, dan token bearer untuk app (disimpan dalam app).
 - **Buang user = nyahaktif (soft-delete)**: sesi dibatalkan, tetapi `owner_id` pada event kekal. Tambah semula email yang sama → akaun yang sama diaktifkan semula, dan event lamanya kelihatan semula (arahan #14).
 - **Login app tanpa library Google:** app buka `live.johorstudio.com/login?app=1` dalam Custom Tab/browser, kemudian selepas berjaya server redirect ke `jstether://auth?token=…`. Kenapa: satu implementasi login sahaja (di server), dan app tidak perlu Google Play Services SDK. Ini penting kerana toolchain build kita sekarang tanpa Gradle/Maven.
@@ -232,7 +232,7 @@ Arahan #15 ("kalau takda folder, maksudnya tiada fail") dan #17 (admin ubah mela
 | Deploy | TrueNAS Custom App YAML di **m10** + skrip `setup-truenas.sh` | Corak sama seperti website sedia ada |
 | Storan | NFS export di **tnas** → mount di **m10** melalui Tailscale | Fail kekal di tnas (arahan #40, #43) |
 | Domain | Tambah hostname `live.johorstudio.com` pada Cloudflare Tunnel `m10` | Cara sama seperti cloud.johorstudio.com, tiada port dibuka |
-| Email | Mailjet (noreply@johorstudio.com) | Sudah digunakan (arahan #48) |
+| Email | API JohorStudio Mail (m10:8140) → Mailjet | Servis sedia ada, template `login_code` sudah wujud (arahan #48) |
 | App | Java Android (sambung dari v1.3/v2.0) | Kod PTP yang sudah terbukti |
 
 ---
@@ -290,11 +290,22 @@ GET  /api/admin/users          POST /api/admin/users {email, role}   PATCH /api/
 1. **Path di tnas:** sahkan `/mnt/ssd/client-1month/livephoto` wujud (pool `ssd` di tnas?). Skrip akan semak dan cipta `livephoto/EVENTS` jika perlu.
 2. **NFS export di tnas:** share `/mnt/ssd/client-1month/livephoto`, hanya dibenarkan dari IP Tailscale m10.
 3. **Google Sign-In:** OAuth Client ID (Web) dengan origin `https://live.johorstudio.com`.
-4. **Mailjet:** API key + secret, dan sahkan `noreply@johorstudio.com` sebagai penghantar.
+4. **JohorStudio Mail:** cipta API key untuk app `livephoto` di email.johorstudio.com (Admin → API keys).
 5. **Cloudflare:** hostname `live.johorstudio.com` → `http://localhost:8095` pada tunnel `m10`.
 6. **Nama versi:** v3 / "JS Live Photo" (boleh ditukar).
 
 ---
+
+## 9b. Projek sedia ada yang berkaitan (guna semula, jangan bina semula)
+| Repo | Kaitan |
+|---|---|
+| `johorstudio-mail` (m10, `email.johorstudio.com`, API `:8140`) | Hantar kod login 6 digit (template `login_code`), Mailjet + fallback Gmail |
+| `invoicev2` | Contoh corak auth yang sama: Google OAuth + allowlist email, OTP 6 digit (`lib/otp.ts`, `lib/auth.ts`, `app/auth/google`), tema johorstudio.com + font Archivo |
+| `teleprompter-mac-windows` (`tele.johorstudio.com`) | Contoh lain kod 6 digit melalui email, remote telefon tanpa VPN |
+| `johorstudio-website` (m10) | Tema, corak deploy Custom App + Cloudflare Tunnel `m10` |
+| `image-to-webp` | Pratetap kualiti WebP (40/50/65) yang Rafi biasa guna |
+| `johorstudio-mediamtx` (tnas, `192.168.1.131`, SSH `truenas_admin`) | Corak app Node.js di TrueNAS + Telegram alert |
+| `order-class-photo` | Jualan gambar konvo, boleh disambung dengan event live kemudian |
 
 ## 10. Log keputusan (ringkas)
 | # | Keputusan | Alternatif yang ditolak | Sebab |
@@ -302,6 +313,7 @@ GET  /api/admin/users          POST /api/admin/users {email, role}   PATCH /api/
 | D1 | App upload melalui API di `live.johorstudio.com` (admin boleh guna Tailscale) | SMB terus dari app; Tailscale untuk semua | User/public tiada Tailscale (#45); kebenaran per user, isyarat live, login Google |
 | D11 | Server di m10, fail di tnas melalui NFS/Tailscale | Server di tnas | Pilihan Rafi (#41, #43); m10 sudah hos website + tunnel |
 | D12 | Padam event terus, dengan pengesahan taip nama | Tong sampah 7 hari | Pilihan Rafi (#50) |
+| D13 | Kod login melalui JohorStudio Mail API | Panggil Mailjet terus | Servis sedia ada: template, retry, log, fallback Gmail |
 | D2 | Filesystem = kebenaran + `.livephoto.json` | DB sahaja | Admin ubah melalui SMB, arahan #15 |
 | D3 | SSE + fallback poll 5 s | Poll 2 s / WebSocket | Serta-merta, mesra Cloudflare, jimat bateri |
 | D4 | Justified rows dengan dimensi dari server | Masonry kolum / grid tetap | Rupa Google Photos, tiada lompatan layout |
