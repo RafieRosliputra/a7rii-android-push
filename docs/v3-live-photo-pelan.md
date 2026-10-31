@@ -57,7 +57,24 @@
 35. Ada **status** dan **log**.
 36. Pilihan **skrin sentiasa ON**, **kecerahan minimum**, **telefon tak boleh sleep**, dan **app jalan di latar belakang** bila tak difokus.
 
-### 1.7 Permintaan untuk sesi ini
+### 1.7 Pembetulan & jawapan Rafi (pusingan 2, 31 Okt 2026 22:36)
+40. **Ada dua TrueNAS.** Claude tersilap anggap hanya satu.
+    - **m10** (`192.168.0.100`, nama Tailscale `m10`): hos johorstudio.com, Nextcloud `cloud.johorstudio.cc`.
+    - **tnas** (nama Tailscale `tnas`): Nextcloud `cloud.johorstudio.com`. **Fail disimpan di tnas.**
+41. Server live photo (website + API) dijalankan di **m10**.
+42. Domain dibuka **cara sama seperti cloud.johorstudio.com**, iaitu **Cloudflare Tunnel**.
+43. m10 akses gambar di tnas melalui **NFS mount melalui Tailscale**.
+44. `/mnt/ssd/livephoto` (DB, thumbnail, kod) di **m10**.
+45. **User (jurugambar) dan public TIADA Tailscale. Hanya admin ada Tailscale.** Upload user dan public mesti berfungsi tanpa Tailscale.
+46. Simpanan: **tiada had**. Galeri dan fail kekal sehingga dipadam manual (nama `client-1month` tidak bermaksud padam automatik).
+47. Bahasa website: **English**.
+48. Email kod login dari **noreply@johorstudio.com**, dihantar melalui **Mailjet** (`email.johorstudio.com`).
+49. Gambar tetamu **terus muncul** dalam galeri (tiada kelulusan). Admin/user boleh sorok atau padam.
+50. Padam event = **padam terus** (tiada tong sampah).
+51. Jurugambar per event: **tiada had** (Photographer 1, 2, 3…).
+52. Soalan kepada Rafi mesti dalam bentuk **pilihan yang boleh diklik**.
+
+### 1.8 Permintaan untuk sesi ini
 37. **Fikir dulu, jangan kod.** Cari kaedah paling kemas untuk teruskan.
 38. Mockup: **paparan admin, paparan user, website, client view, client upload.**
 39. **Rekod semua arahan dan cara Claude berfikir** dalam `.md` (fail ini).
@@ -66,8 +83,10 @@
 
 ## 2. Apa yang Claude jumpa (konteks sedia ada)
 
+> **Pembetulan (pusingan 2):** ada **dua** TrueNAS, iaitu **m10** (`192.168.0.100`, website + `cloud.johorstudio.cc`) dan **tnas** (`cloud.johorstudio.com`, tempat fail disimpan). Lihat §1.7 dan §3.1 yang dikemas kini.
+
 Dari repo `johorstudio-website`:
-- TrueNAS di `192.168.0.100`, pool **`ssd`**. Website berjalan sebagai **TrueNAS Custom App** (`Apps > Installed`, dipasang dengan YAML).
+- TrueNAS **m10** di `192.168.0.100`, pool **`ssd`**. Website berjalan sebagai **TrueNAS Custom App** (`Apps > Installed`, dipasang dengan YAML).
 - Domain awam keluar melalui **Cloudflare Tunnel `m10`** (Zero Trust › Networks › Tunnels). Ada juga Cloudflare Access untuk `webmaster.` dan `editor.`.
 - Skrip `deploy/setup-truenas.sh` yang dijalankan melalui SSH sebagai root, dan selamat diulang.
 - Tema: font **Archivo** (variable width), teal **`#1f6f68`**, graphite **`#20272b`**, paper **`#f5f7f7`**, mist **`#e2e8e9`**, steel **`#66737a`**, merah "tally" **`#d6453d`**.
@@ -79,28 +98,35 @@ Dari repo `johorstudio-website`:
 
 ## 3. Keputusan seni bina (dan sebabnya)
 
-### 3.1 Satu server, satu pintu masuk
-**Keputusan:** satu servis backend (API + website) sebagai TrueNAS Custom App `livephoto`, sama corak dengan website sedia ada.
+### 3.1 Satu server di m10, fail di tnas (dikemas kini pusingan 2)
+**Keputusan:** satu servis backend (API + website) sebagai TrueNAS Custom App `livephoto` di **m10**, sama corak dengan website johorstudio.com. Gambar disimpan di **tnas** dan di-mount ke m10 melalui **NFS melalui Tailscale**.
 
 ```
-           Internet                                   Tailscale / LAN
- Tetamu ──► live.johorstudio.com ──► Cloudflare Tunnel m10 ─┐
- Admin  ──► live.johorstudio.com ───────────────────────────┤
-                                                            ▼
- App user ──► http://<tnas-tailscale>:8095 ────────► [ livephoto app di TrueNAS ]
-     (fallback: live.johorstudio.com)                 ├─ API + website + SSE live
-                                                      ├─ SQLite: /mnt/ssd/livephoto/data
-                                                      └─ Gambar: /mnt/ssd/client-1month/livephoto/EVENTS/…
- Admin (SMB) ──► \\tnas\livephoto-events ─────────────────────► (folder yang sama)
+                    INTERNET (user & tetamu tiada Tailscale)
+ Tetamu (web) ─────┐
+ Jurugambar (app) ─┼──► https://live.johorstudio.com ──► Cloudflare Tunnel (m10)
+ Admin (web/app) ──┘                                              │
+                                                                  ▼
+ ┌──────────────────────── m10 (192.168.0.100) ──────────────────────────┐
+ │  Custom App "livephoto": API + website + SSE live                      │
+ │  /mnt/ssd/livephoto/{app,data/livephoto.db,cache/thumbs}               │
+ │  /mnt/tnas-livephoto  ◄── NFS mount melalui Tailscale (m10 → tnas)     │
+ └────────────────────────────────────────┬──────────────────────────────┘
+                                          │ Tailscale (NFS)
+ ┌──────────────────────── tnas ──────────▼──────────────────────────────┐
+ │  /mnt/ssd/client-1month/livephoto/EVENTS/…   (gambar sebenar)          │
+ │  Share SMB untuk admin ──► admin nampak semua folder (arahan #17)      │
+ └───────────────────────────────────────────────────────────────────────┘
+ Admin dengan Tailscale: boleh juga terus ke http://m10:8095 (lebih laju), dan SMB ke tnas.
 ```
 
-**Kenapa app tidak upload melalui SMB (seperti v2.0)?**
-- Arahan #5 kata app "direct guna tnas". Claude tafsirkan sebagai **sambung terus ke TrueNAS melalui Tailscale** (laju, tidak melalui internet awam). Tapi app tetap bercakap dengan **API servis yang sama**, bukan SMB, kerana:
-  - Kebenaran per user (hanya event sendiri, slot Photographer N) mesti dikuatkuasa di **satu tempat**. Dengan SMB, setiap jurugambar perlu akaun TrueNAS sendiri dan ACL per folder, yang leceh dan mudah bocor.
-  - Server perlu **tahu serta-merta** gambar baru masuk (untuk live refresh, thumbnail, kiraan). Upload melalui API memberi isyarat itu terus.
-  - Login Google/OTP hanya wujud di server. SMB tak faham Google.
-- App cuba **alamat Tailscale dulu**. Kalau tak dapat (contohnya Tailscale OFF), ia guna `live.johorstudio.com` melalui Cloudflare. Upload tetap jalan.
-- **SMB kekal untuk admin** (arahan #17): share `livephoto-events` → folder `EVENTS` yang sama.
+**Kenapa begini:**
+- **User dan tetamu tiada Tailscale** (arahan #45), jadi **semua upload mereka melalui `live.johorstudio.com`** (Cloudflare Tunnel di m10). Ini cara yang sama seperti `cloud.johorstudio.com` dibuka (arahan #42). Tunnel `m10` yang sedia ada hanya perlu hostname baru.
+- **Upload dipecah (chunked, ~4 MB)**: tahan rangkaian 4G yang lemah, boleh sambung semula, dan selamat dengan had 100 MB per request Cloudflare (JPG penuh 24 MB pun lepas).
+- **App tetap bercakap dengan API, bukan SMB:** kebenaran per user dan slot Photographer N dikuatkuasa di satu tempat. Server juga tahu serta-merta gambar baru masuk (untuk live), dan login Google/kod hanya wujud di server.
+- **Admin** (ada Tailscale) boleh guna alamat terus `m10` untuk upload lebih laju. App cuba alamat Tailscale dahulu jika ditetapkan, dan guna domain awam jika gagal.
+- **NFS** (bukan SMB) untuk m10 ↔ tnas: lebih stabil untuk servis yang banyak baca/tulis fail kecil, dan kebenaran fail mudah diselaraskan (UID app).
+- **Risiko:** kalau Tailscale m10 ↔ tnas terputus, server tak boleh simpan gambar. Rancangan: server semak mount setiap kali sebelum terima upload. Kalau putus, upload ditolak dengan mesej "storage offline" supaya app mencuba semula kemudian (gambar tetap selamat dalam telefon). Tiada gambar disimpan separuh di m10.
 
 ### 3.2 Folder di disk = sumber kebenaran
 Arahan #15 ("kalau takda folder, maksudnya tiada fail") dan #17 (admin ubah melalui SMB) bermaksud **filesystem ialah kebenaran**, manakala database hanya metadata.
@@ -113,6 +139,7 @@ Arahan #15 ("kalau takda folder, maksudnya tiada fail") dan #17 (admin ubah mela
 
 ### 3.3 Struktur folder
 ```
+# di tnas (di-mount ke m10 sebagai /mnt/tnas-livephoto)
 /mnt/ssd/client-1month/livephoto/
 └── EVENTS/
     └── 20261031 Konvo Tadika Bandar Putra/
@@ -120,20 +147,21 @@ Arahan #15 ("kalau takda folder, maksudnya tiada fail") dan #17 (admin ubah mela
         ├── Photographer 1/          # webp (atau jpg penuh) dari user slot 1
         ├── Photographer 2/
         └── public upload/           # dari tetamu (webp sahaja)
+# di m10
 /mnt/ssd/livephoto/
 ├── app/                             # kod (git clone)
 ├── data/livephoto.db                # SQLite: user, event, ahli, sesi, token
 └── cache/thumbs/<event-id>/…        # thumbnail 480px & 1600px (boleh dipadam & dijana semula)
 ```
 - Thumbnail **di luar** folder EVENTS, supaya admin melalui SMB hanya nampak gambar sebenar.
-- Nama `client-1month` mencadangkan **simpanan 1 bulan**. Claude **tidak akan memadam apa-apa secara automatik** tanpa pengesahan (lihat soalan §9).
+- **Simpanan tiada had** (arahan #46). Tiada padam automatik. Galeri kekal sehingga dipadam manual.
 
 ### 3.4 Pengguna, peranan, login
 - **Peranan:** `admin`, `user`. Admin pertama: `rafierosliputra@gmail.com`.
 - **Senarai dibenarkan (allowlist):** hanya email yang admin masukkan boleh login. Login Google dengan email lain ditolak (arahan #11).
 - **Dua cara login, satu identiti (email):**
   1. **Google Sign-In.** Server sahkan ID token Google, kemudian email mesti ada dalam allowlist dan status aktif.
-  2. **Kod email 6 digit.** Kod sah 10 minit, maksimum 5 cubaan, had kadar per email/IP. Dihantar melalui SMTP Gmail (perlukan App Password, lihat §9).
+  2. **Kod email 6 digit.** Kod sah 10 minit, maksimum 5 cubaan, had kadar per email/IP. Dihantar dari **noreply@johorstudio.com melalui Mailjet** (domain penghantar `email.johorstudio.com`), sama ada melalui SMTP Mailjet atau API Mailjet dengan API key/secret.
 - **Sesi 30 hari** (arahan #12): cookie `HttpOnly; Secure` untuk web, dan token bearer untuk app (disimpan dalam app).
 - **Buang user = nyahaktif (soft-delete)**: sesi dibatalkan, tetapi `owner_id` pada event kekal. Tambah semula email yang sama → akaun yang sama diaktifkan semula, dan event lamanya kelihatan semula (arahan #14).
 - **Login app tanpa library Google:** app buka `live.johorstudio.com/login?app=1` dalam Custom Tab/browser, kemudian selepas berjaya server redirect ke `jstether://auth?token=…`. Kenapa: satu implementasi login sahaja (di server), dan app tidak perlu Google Play Services SDK. Ini penting kerana toolchain build kita sekarang tanpa Gradle/Maven.
@@ -149,7 +177,9 @@ Arahan #15 ("kalau takda folder, maksudnya tiada fail") dan #17 (admin ubah mela
 | Urus user, slot, event contoh | ✅ | ❌ | ❌ |
 
 - Pautan galeri: `live.johorstudio.com/e/<token rawak 8-10 aksara>`. **Tiada senarai awam** (arahan #23). Admin boleh "Tukar pautan" untuk batalkan pautan lama.
-- **Padam event:** padam terus folder di disk (arahan #9). Cadangan keselamatan: pindah ke `EVENTS/.trash/` dulu selama 7 hari. Perlu pengesahan (§9).
+- **Padam event:** **padam terus** folder di disk (arahan #9, #50). Tiada tong sampah. Sebab itu UI minta pengesahan dengan **taip nama event** sebelum padam.
+- **Gambar tetamu terus muncul** (arahan #49). Admin dan pemilik event boleh **sorok** (disembunyikan dari galeri, fail kekal) atau **padam** satu gambar.
+- **Slot jurugambar tiada had** (arahan #51): Photographer 1, 2, 3…
 
 ### 3.6 Live refresh galeri (arahan #28)
 **Keputusan: Server-Sent Events (SSE), bukan polling.**
@@ -191,7 +221,7 @@ Arahan #15 ("kalau takda folder, maksudnya tiada fail") dan #17 (admin ubah mela
 ### 3.10 Website
 - Landing page (tema johorstudio.com): hero, cara ia berfungsi (3 langkah), **seksyen contoh event** (hanya jika admin tandakan), ciri, butang WhatsApp `wa.me/60127983745` dan pautan ke borang hubungi johorstudio.com, serta footer.
 - Admin panel di web yang sama (`/admin`): EVENTS, jurugambar per event, pengguna (allowlist), event contoh, tetapan.
-- **Bahasa:** mockup dalam Bahasa Melayu. Johorstudio.com dalam English, jadi perlu keputusan sama ada BM, EN atau dwibahasa (§9).
+- **Bahasa: English** (arahan #47), selari dengan johorstudio.com. Mockup awal dalam BM akan ditukar ke English. App jurugambar kekal BM (untuk pasukan sendiri), dan ini boleh diubah.
 
 ### 3.11 Teknologi dicadangkan
 | Bahagian | Pilihan | Sebab |
@@ -199,8 +229,10 @@ Arahan #15 ("kalau takda folder, maksudnya tiada fail") dan #17 (admin ubah mela
 | Backend | **Node.js (Fastify) + SQLite** dalam satu container | Ringan, satu proses, SSE mudah, `sharp` (libvips) laju untuk thumbnail |
 | Frontend | HTML/CSS/JS statik (tanpa framework), seperti johorstudio.com | Laju di telefon, mudah diselenggara |
 | Encoder web | jSquash WebP (WASM) | Safari tiada WebP encoder canvas |
-| Deploy | TrueNAS Custom App YAML + skrip `setup-truenas.sh` | Corak sama seperti website sedia ada |
-| Domain | Tambah hostname `live.johorstudio.com` pada tunnel `m10` | Tiada port dibuka di router |
+| Deploy | TrueNAS Custom App YAML di **m10** + skrip `setup-truenas.sh` | Corak sama seperti website sedia ada |
+| Storan | NFS export di **tnas** → mount di **m10** melalui Tailscale | Fail kekal di tnas (arahan #40, #43) |
+| Domain | Tambah hostname `live.johorstudio.com` pada Cloudflare Tunnel `m10` | Cara sama seperti cloud.johorstudio.com, tiada port dibuka |
+| Email | Mailjet (noreply@johorstudio.com) | Sudah digunakan (arahan #48) |
 | App | Java Android (sambung dari v1.3/v2.0) | Kod PTP yang sudah terbukti |
 
 ---
@@ -251,24 +283,25 @@ GET  /api/admin/users          POST /api/admin/users {email, role}   PATCH /api/
 4. **App v3:** login melalui browser, senarai event, foreground service, WebP, giliran kekal, Tailscale + fallback.
 5. **Deploy:** skrip TrueNAS dan hostname tunnel. Ujian event sebenar.
 
-## 9. Soalan / maklumat yang Claude perlukan daripada Rafi
-1. **Path:** sahkan `/mnt/ssd/livephoto` dan `/mnt/ssd/client-1month/livephoto` (atau benarkan skrip pasang menciptanya). Adakah `client-1month` dataset sedia ada dengan dasar padam automatik 1 bulan?
-2. **Simpanan:** padam event automatik selepas 1 bulan? Atau hanya tutup galeri awam? Event dipadam pergi ke tong sampah 7 hari dulu?
-3. **TrueNAS melalui Tailscale:** IP Tailscale atau nama MagicDNS TrueNAS, dan port yang boleh digunakan (cadangan 8095).
-4. **Google Sign-In:** projek Google Cloud + OAuth Client ID (Web) dengan origin `https://live.johorstudio.com`. Claude boleh tulis langkah demi langkah.
-5. **Email kod login:** `noreply@gmail.com` bukan alamat milik awak. Perlu satu akaun Gmail sebenar (contohnya `johorstudio.noreply@gmail.com`) + **App Password** untuk SMTP. Atau guna domain `noreply@johorstudio.com` melalui servis email.
-6. **Cloudflare:** tambah public hostname `live.johorstudio.com` → `http://<truenas>:8095` pada tunnel `m10` (atau Claude sediakan langkah).
-7. **Bahasa website:** BM, English atau dwibahasa?
-8. **Bilangan jurugambar maksimum per event** (2, 3, …)?
-9. **Gambar tetamu:** perlukan kelulusan admin sebelum muncul (moderasi), atau terus muncul?
-10. **Nama versi:** v3 / "JS Live Photo" OK?
+## 9. Jawapan Rafi & perkara yang masih perlu
+**Sudah dijawab (pusingan 2):** server di m10 · Cloudflare Tunnel · NFS melalui Tailscale · data web di m10 · user/public tanpa Tailscale · simpanan tiada had · English · Mailjet noreply@johorstudio.com · tetamu terus muncul · padam terus · jurugambar tiada had. (Lihat §1.7.)
+
+**Masih diperlukan semasa setup** (Claude akan beri langkah demi langkah):
+1. **Path di tnas:** sahkan `/mnt/ssd/client-1month/livephoto` wujud (pool `ssd` di tnas?). Skrip akan semak dan cipta `livephoto/EVENTS` jika perlu.
+2. **NFS export di tnas:** share `/mnt/ssd/client-1month/livephoto`, hanya dibenarkan dari IP Tailscale m10.
+3. **Google Sign-In:** OAuth Client ID (Web) dengan origin `https://live.johorstudio.com`.
+4. **Mailjet:** API key + secret, dan sahkan `noreply@johorstudio.com` sebagai penghantar.
+5. **Cloudflare:** hostname `live.johorstudio.com` → `http://localhost:8095` pada tunnel `m10`.
+6. **Nama versi:** v3 / "JS Live Photo" (boleh ditukar).
 
 ---
 
 ## 10. Log keputusan (ringkas)
 | # | Keputusan | Alternatif yang ditolak | Sebab |
 |---|---|---|---|
-| D1 | App upload melalui API (Tailscale dahulu) | SMB terus dari app | Kebenaran per user, isyarat live, login Google |
+| D1 | App upload melalui API di `live.johorstudio.com` (admin boleh guna Tailscale) | SMB terus dari app; Tailscale untuk semua | User/public tiada Tailscale (#45); kebenaran per user, isyarat live, login Google |
+| D11 | Server di m10, fail di tnas melalui NFS/Tailscale | Server di tnas | Pilihan Rafi (#41, #43); m10 sudah hos website + tunnel |
+| D12 | Padam event terus, dengan pengesahan taip nama | Tong sampah 7 hari | Pilihan Rafi (#50) |
 | D2 | Filesystem = kebenaran + `.livephoto.json` | DB sahaja | Admin ubah melalui SMB, arahan #15 |
 | D3 | SSE + fallback poll 5 s | Poll 2 s / WebSocket | Serta-merta, mesra Cloudflare, jimat bateri |
 | D4 | Justified rows dengan dimensi dari server | Masonry kolum / grid tetap | Rupa Google Photos, tiada lompatan layout |
@@ -277,4 +310,4 @@ GET  /api/admin/users          POST /api/admin/users {email, role}   PATCH /api/
 | D7 | Soft-delete user | Padam user | Arahan #14: folder kekal, tambah semula pulih |
 | D8 | Thumbnail di luar EVENTS | Thumbnail dalam folder event | SMB admin bersih, cache boleh dijana semula |
 | D9 | Foreground Service | Activity sahaja (v1/v2) | Jalan di latar belakang, arahan #36 |
-| D10 | Satu Custom App + tunnel `m10` | VPS / port dibuka | Corak sama dengan johorstudio.com, percuma |
+| D10 | Satu Custom App di m10 + tunnel `m10` | VPS / port dibuka | Corak sama dengan johorstudio.com, percuma |
