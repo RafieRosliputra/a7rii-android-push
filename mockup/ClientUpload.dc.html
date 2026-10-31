@@ -1,8 +1,8 @@
 <!doctype html>
-<html lang="ms">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Client — upload gambar</title>
+<title>Client — upload photos</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -16,17 +16,17 @@
 
   <div role="dialog" aria-labelledby="up-title" style="position: absolute; left: 0; right: 0; bottom: 0; background: #ffffff; border-radius: 18px 18px 0 0; padding: 20px 20px 28px; display: flex; flex-direction: column; gap: 16px;">
     <div style="width: 40px; height: 4px; border-radius: 2px; background: #c9d3d2; align-self: center;"></div>
-    <h2 id="up-title" style="margin: 0; font-size: 22px; font-stretch: 85%;">Upload gambar anda</h2>
-    <p style="margin: 0; font-size: 15px; line-height: 1.5; color: #5b676b;">Gambar anda akan masuk ke galeri event ini (folder <b style="color: #1d2528;">public upload</b>). Gambar dikecilkan dalam telefon anda dahulu supaya upload laju.</p>
+    <h2 id="up-title" style="margin: 0; font-size: 22px; font-stretch: 85%;">Upload your photos</h2>
+    <p style="margin: 0; font-size: 15px; line-height: 1.5; color: #5b676b;">Your photos go into this event's gallery. They're compressed on your phone first, so they upload quickly.</p>
 
-    <div style="background: #fdf1e6; border: 1px solid #e9c39a; border-radius: 10px; padding: 12px; font-size: 14px; line-height: 1.45; color: #6b3f12; font-weight: 600;">Jangan tutup halaman ini sehingga upload selesai.</div>
+    <div style="background: #fdf1e6; border: 1px solid #e9c39a; border-radius: 10px; padding: 12px; font-size: 14px; line-height: 1.45; color: #6b3f12; font-weight: 600;">Keep this page open until the upload finishes.</div>
 
     <div style="display: flex; flex-direction: column; gap: 8px;">
       <div style="display: flex; justify-content: space-between; font-size: 14px;">
-        <span style="font-weight: 700;">7 daripada 12 gambar</span><span style="color: #5b676b;">58%</span>
+        <span style="font-weight: 700;">7 of 12 photos</span><span style="color: #5b676b;">58%</span>
       </div>
       <div style="height: 10px; background: #e2e8e9; border-radius: 5px;"><div style="width: 58%; height: 10px; background: #1f6f68; border-radius: 5px;"></div></div>
-      <div style="font-size: 13px; color: #5b676b;">IMG_2231.jpg · tukar ke WebP… 4.8 MB → 0.9 MB</div>
+      <div style="font-size: 13px; color: #5b676b;">IMG_2231.jpg · converting to WebP… 4.8 MB → 0.9 MB</div>
     </div>
 
     <div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px;">
@@ -44,13 +44,13 @@
       <div style="aspect-ratio: 1; background: #e2e8e9; border-radius: 4px;"></div>
     </div>
 
-    <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #5b676b;">Nama anda (pilihan)
-      <input type="text" value="Keluarga Hakim" style="font: inherit; font-size: 16px; padding: 12px; border: 1px solid #c9d3d2; border-radius: 8px; color: #1d2528;">
+    <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #5b676b;">Your name (optional)
+      <input type="text" value="The Hakim family" style="font: inherit; font-size: 16px; padding: 12px; border: 1px solid #c9d3d2; border-radius: 8px; color: #1d2528;">
     </label>
 
     <div style="display: flex; gap: 10px;">
-      <button type="button" style="flex: 1; height: 50px; font: inherit; font-weight: 600; border-radius: 10px; border: 1px solid #c9d3d2; background: #fff; color: #1d2528;">Batal</button>
-      <button type="button" style="flex: 2; height: 50px; font: inherit; font-weight: 700; border-radius: 10px; border: 0; background: #1f6f68; color: #fff;">+ Tambah gambar</button>
+      <button type="button" style="flex: 1; height: 50px; font: inherit; font-weight: 600; border-radius: 10px; border: 1px solid #c9d3d2; background: #fff; color: #1d2528;">Cancel</button>
+      <button type="button" style="flex: 2; height: 50px; font: inherit; font-weight: 700; border-radius: 10px; border: 0; background: #1f6f68; color: #fff;">+ Add photos</button>
     </div>
   </div>
 </div>

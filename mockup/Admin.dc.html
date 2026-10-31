@@ -1,8 +1,8 @@
 <!doctype html>
-<html lang="ms">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Admin — event dan pengguna</title>
+<title>Admin — events and users</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -19,9 +19,9 @@ a{color:#1f6f68}a:hover{color:#174f4a}
   <aside style="flex: 1 1 220px; max-width: 100%; background: #20272b; color: #e2e8e9; padding: 24px 18px; display: flex; flex-direction: column; gap: 6px; box-sizing: border-box;">
     <div style="font-stretch: 75%; font-weight: 700; font-size: 20px; letter-spacing: 0.04em; color: #fff; padding-bottom: 16px;">JS LIVE · Admin</div>
     <a href="#" style="color: #fff; background: #1f6f68; text-decoration: none; padding: 10px 12px; border-radius: 6px; font-weight: 600;">EVENTS</a>
-    <a href="#" style="color: #e2e8e9; text-decoration: none; padding: 10px 12px; border-radius: 6px;">Pengguna</a>
-    <a href="#" style="color: #e2e8e9; text-decoration: none; padding: 10px 12px; border-radius: 6px;">Contoh di landing page</a>
-    <a href="#" style="color: #e2e8e9; text-decoration: none; padding: 10px 12px; border-radius: 6px;">Tetapan</a>
+    <a href="#" style="color: #e2e8e9; text-decoration: none; padding: 10px 12px; border-radius: 6px;">Users</a>
+    <a href="#" style="color: #e2e8e9; text-decoration: none; padding: 10px 12px; border-radius: 6px;">Landing page sample</a>
+    <a href="#" style="color: #e2e8e9; text-decoration: none; padding: 10px 12px; border-radius: 6px;">Settings</a>
     <div style="margin-top: auto; padding-top: 24px; font-size: 13px; color: #9aa8a6;">rafierosliputra@gmail.com · admin</div>
   </aside>
 
@@ -32,17 +32,17 @@ a{color:#1f6f68}a:hover{color:#174f4a}
         <h1 style="margin: 0; font-stretch: 85%; font-size: 30px;">20261031 Konvo Tadika Bandar Putra</h1>
       </div>
       <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-        <button type="button" style="font: inherit; font-weight: 600; padding: 10px 16px; border-radius: 6px; border: 1px solid #c9d3d2; background: #fff; color: #1d2528;">Tunjuk QR</button>
-        <button type="button" style="font: inherit; font-weight: 600; padding: 10px 16px; border-radius: 6px; border: 0; background: #1f6f68; color: #fff;">+ Event baru</button>
+        <button type="button" style="font: inherit; font-weight: 600; padding: 10px 16px; border-radius: 6px; border: 1px solid #c9d3d2; background: #fff; color: #1d2528;">Show QR</button>
+        <button type="button" style="font: inherit; font-weight: 600; padding: 10px 16px; border-radius: 6px; border: 0; background: #1f6f68; color: #fff;">+ New event</button>
       </div>
     </div>
 
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 20px; align-items: start;">
 
       <section style="background: #fff; border: 1px solid #dde3e5; border-radius: 10px; padding: 20px; display: flex; flex-direction: column; gap: 16px;">
-        <h2 style="margin: 0; font-size: 18px;">Pautan galeri</h2>
+        <h2 style="margin: 0; font-size: 18px;">Gallery link</h2>
         <div style="display: flex; gap: 16px; align-items: center;">
-          <div aria-label="Kod QR" role="img" style="width: 96px; height: 96px; flex: none; background: #1d2528; border-radius: 6px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 8px; box-sizing: border-box;">
+          <div aria-label="QR code" role="img" style="width: 96px; height: 96px; flex: none; background: #1d2528; border-radius: 6px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 8px; box-sizing: border-box;">
             <div style="background: #fff;"></div><div></div><div style="background: #fff;"></div><div style="background: #fff;"></div>
             <div></div><div style="background: #fff;"></div><div></div><div style="background: #fff;"></div>
             <div style="background: #fff;"></div><div style="background: #fff;"></div><div></div><div></div>
@@ -51,22 +51,22 @@ a{color:#1f6f68}a:hover{color:#174f4a}
           <div style="display: flex; flex-direction: column; gap: 8px; min-width: 0;">
             <div style="font-family: ui-monospace, monospace; font-size: 14px; background: #f5f7f7; border: 1px solid #dde3e5; padding: 8px 10px; border-radius: 6px; overflow-wrap: anywhere;">live.johorstudio.com/e/k7Qp2x</div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <button type="button" style="font: inherit; font-size: 14px; padding: 8px 12px; border-radius: 6px; border: 1px solid #c9d3d2; background: #fff;">Salin</button>
-              <button type="button" style="font: inherit; font-size: 14px; padding: 8px 12px; border-radius: 6px; border: 1px solid #c9d3d2; background: #fff;">Tukar pautan</button>
+              <button type="button" style="font: inherit; font-size: 14px; padding: 8px 12px; border-radius: 6px; border: 1px solid #c9d3d2; background: #fff;">Copy</button>
+              <button type="button" style="font: inherit; font-size: 14px; padding: 8px 12px; border-radius: 6px; border: 1px solid #c9d3d2; background: #fff;">Change link</button>
             </div>
           </div>
         </div>
-        <label style="display: flex; gap: 10px; align-items: center; font-size: 15px;"><input type="checkbox" checked="checked" style="width: 20px; height: 20px;"> Benarkan upload tetamu (folder <b>public upload</b>)</label>
-        <label style="display: flex; gap: 10px; align-items: center; font-size: 15px;"><input type="checkbox" style="width: 20px; height: 20px;"> Jadikan contoh di landing page</label>
+        <label style="display: flex; gap: 10px; align-items: center; font-size: 15px;"><input type="checkbox" checked="checked" style="width: 20px; height: 20px;"> Allow guest uploads (<b>public upload</b> folder)</label>
+        <label style="display: flex; gap: 10px; align-items: center; font-size: 15px;"><input type="checkbox" style="width: 20px; height: 20px;"> Feature as sample on landing page</label>
         <div style="display: flex; gap: 24px; font-size: 14px; color: #5b676b;">
-          <span><b style="color: #1d2528; font-size: 20px;">412</b> gambar</span>
-          <span><b style="color: #1d2528; font-size: 20px;">37</b> dari tetamu</span>
-          <span><b style="color: #1d2528; font-size: 20px;">86</b> sedang menonton</span>
+          <span><b style="color: #1d2528; font-size: 20px;">412</b> photos</span>
+          <span><b style="color: #1d2528; font-size: 20px;">37</b> from guests</span>
+          <span><b style="color: #1d2528; font-size: 20px;">86</b> watching now</span>
         </div>
       </section>
 
       <section style="background: #fff; border: 1px solid #dde3e5; border-radius: 10px; padding: 20px; display: flex; flex-direction: column; gap: 12px;">
-        <h2 style="margin: 0; font-size: 18px;">Jurugambar</h2>
+        <h2 style="margin: 0; font-size: 18px;">Photographers</h2>
         <div style="display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #e2e8e9;">
           <div style="width: 130px; font-weight: 600;">Photographer 1</div>
           <div style="flex: 1; min-width: 0;">Rafi <span style="color: #5b676b; font-size: 13px;">· rafierosliputra@gmail.com</span></div>
@@ -74,40 +74,40 @@ a{color:#1f6f68}a:hover{color:#174f4a}
         </div>
         <div style="display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #e2e8e9;">
           <div style="width: 130px; font-weight: 600;">Photographer 2</div>
-          <div style="flex: 1; min-width: 0;">Aiman <span style="color: #5b676b; font-size: 13px;">· aiman@contoh.com</span></div>
-          <span style="font-size: 13px; color: #5b676b;">luar talian · 77</span>
+          <div style="flex: 1; min-width: 0;">Aiman <span style="color: #5b676b; font-size: 13px;">· aiman@example.com</span></div>
+          <span style="font-size: 13px; color: #5b676b;">offline · 77</span>
         </div>
         <div style="display: flex; align-items: center; gap: 12px; padding: 10px 0;">
           <div style="width: 130px; font-weight: 600; color: #5b676b;">public upload</div>
-          <div style="flex: 1; color: #5b676b; font-size: 14px;">Tetamu melalui web</div>
+          <div style="flex: 1; color: #5b676b; font-size: 14px;">Guests via the web</div>
           <span style="font-size: 13px; color: #5b676b;">37</span>
         </div>
-        <button type="button" style="font: inherit; font-weight: 600; padding: 10px 14px; border-radius: 6px; border: 1px dashed #66737a; background: #fff; color: #1d2528; align-self: flex-start;">+ Tambah jurugambar (Photographer 3)</button>
+        <button type="button" style="font: inherit; font-weight: 600; padding: 10px 14px; border-radius: 6px; border: 1px dashed #66737a; background: #fff; color: #1d2528; align-self: flex-start;">+ Add photographer (Photographer 3)</button>
       </section>
 
       <section style="background: #fff; border: 1px solid #dde3e5; border-radius: 10px; padding: 20px; display: flex; flex-direction: column; gap: 10px;">
-        <h2 style="margin: 0; font-size: 18px;">Semua EVENTS</h2>
+        <h2 style="margin: 0; font-size: 18px;">All EVENTS</h2>
         <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #e2e8e9;"><span style="font-weight: 600;">20261031 Konvo Tadika Bandar Putra</span><span style="color: #5b676b; font-size: 14px;">Rafi · 412</span></div>
         <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #e2e8e9;"><span>20261025 Majlis Kahwin Aina &amp; Hakim</span><span style="color: #5b676b; font-size: 14px;">Aiman · 1,203</span></div>
         <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #e2e8e9;"><span>20261019 Hari Sukan SK Kulai</span><span style="color: #5b676b; font-size: 14px;">Rafi · 655</span></div>
-        <div style="font-size: 13px; color: #5b676b;">Admin nampak semua. User nampak event yang dia cipta atau yang dia ditugaskan.</div>
+        <div style="font-size: 13px; color: #5b676b;">Admins see every event. Users see the events they created or were assigned to.</div>
       </section>
 
       <section style="background: #fff; border: 1px solid #dde3e5; border-radius: 10px; padding: 20px; display: flex; flex-direction: column; gap: 12px;">
-        <h2 style="margin: 0; font-size: 18px;">Pengguna</h2>
+        <h2 style="margin: 0; font-size: 18px;">Users</h2>
         <form style="display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end;">
-          <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #5b676b; flex: 1 1 200px;">Email pengguna baru
-            <input type="email" value="jurugambar@gmail.com" style="font: inherit; font-size: 15px; padding: 9px 10px; border: 1px solid #c9d3d2; border-radius: 6px; color: #1d2528;">
+          <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #5b676b; flex: 1 1 200px;">New user's email
+            <input type="email" value="photographer@gmail.com" style="font: inherit; font-size: 15px; padding: 9px 10px; border: 1px solid #c9d3d2; border-radius: 6px; color: #1d2528;">
           </label>
-          <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #5b676b;">Peranan
+          <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #5b676b;">Role
             <select style="font: inherit; font-size: 15px; padding: 9px 10px; border: 1px solid #c9d3d2; border-radius: 6px;"><option>User</option><option>Admin</option></select>
           </label>
-          <button type="button" style="font: inherit; font-weight: 600; padding: 10px 16px; border-radius: 6px; border: 0; background: #1f6f68; color: #fff;">Tambah</button>
+          <button type="button" style="font: inherit; font-weight: 600; padding: 10px 16px; border-radius: 6px; border: 0; background: #1f6f68; color: #fff;">Add</button>
         </form>
         <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #e2e8e9;"><span style="flex: 1;">rafierosliputra@gmail.com</span><span style="font-size: 13px; font-weight: 600;">Admin</span></div>
-        <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #e2e8e9;"><span style="flex: 1;">aiman@contoh.com</span><span style="font-size: 13px;">User · 4 event</span><button type="button" style="font: inherit; font-size: 13px; padding: 6px 10px; border: 1px solid #c9d3d2; background: #fff; border-radius: 6px;">Buang akses</button></div>
-        <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0;"><span style="flex: 1; color: #5b676b;">farid@contoh.com</span><span style="font-size: 13px; color: #5b676b;">Dibuang · folder kekal</span><button type="button" style="font: inherit; font-size: 13px; padding: 6px 10px; border: 1px solid #c9d3d2; background: #fff; border-radius: 6px;">Pulihkan</button></div>
-        <div style="font-size: 13px; color: #5b676b;">Log masuk: Google (email mesti sepadan) atau kod 6 digit ke email. Sesi kekal 30 hari.</div>
+        <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #e2e8e9;"><span style="flex: 1;">aiman@example.com</span><span style="font-size: 13px;">User · 4 events</span><button type="button" style="font: inherit; font-size: 13px; padding: 6px 10px; border: 1px solid #c9d3d2; background: #fff; border-radius: 6px;">Remove access</button></div>
+        <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0;"><span style="flex: 1; color: #5b676b;">farid@example.com</span><span style="font-size: 13px; color: #5b676b;">Removed · folders kept</span><button type="button" style="font: inherit; font-size: 13px; padding: 6px 10px; border: 1px solid #c9d3d2; background: #fff; border-radius: 6px;">Restore</button></div>
+        <div style="font-size: 13px; color: #5b676b;">Sign-in: Google (email must match) or a 6-digit code sent to the user's email. Sessions last 30 days.</div>
       </section>
     </div>
   </main>
