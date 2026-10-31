@@ -20,9 +20,10 @@ services:
       PHOTOS_DIR: /photos
       REQUIRE_STORAGE_MARKER: "1"
       PUBLIC_URL: https://live.johorstudio.com
-      MAIL_API: http://192.168.0.100:8140
-      # Google Cloud project invoicejohorstudiocomlogin, OAuth client "livephoto" (public, not a secret)
-      GOOGLE_CLIENT_ID: 147575767607-uhgoltbdmrhe3slfqdvvhuf0adn971uc.apps.googleusercontent.com
+      # Admin login = Cloudflare Access app "livephoto admin" (paths /admin, /api/admin). ACCESS_AUD is in livephoto.env.
+      ACCESS_TEAM_DOMAIN: johorstudio.cloudflareaccess.com
+      ADMIN_EMAILS: rafierosliputra@gmail.com,johorstudio@gmail.com
+      MODERATOR_URL: http://moderator:8096
     ports:
       - "8095:8095"   # Cloudflare tunnel m10: live.johorstudio.com -> http://192.168.0.100:8095
     volumes:
@@ -39,4 +40,31 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    depends_on:
+      - moderator
+    restart: unless-stopped
+
+  # AI check for guest photos (NSFW, politics, documents/text, violence...). CPU only, models cached on m10.
+  moderator:
+    image: python:3.11-slim
+    container_name: livephoto-moderator
+    user: "568:568"
+    working_dir: /app/moderator
+    command: sh -c "pip install --no-cache-dir -q --user -r requirements.txt && exec python -u app.py"
+    environment:
+      TZ: Asia/Kuala_Lumpur
+      HOME: /models
+      HF_HOME: /models/hf
+      PHOTOS_DIR: /photos
+      PORT: "8096"
+      THREADS: "4"
+    volumes:
+      - /mnt/ssd/livephoto/app:/app:ro
+      - /mnt/ssd/livephoto/models:/models
+      - type: bind
+        source: /mnt/tnas-livephoto
+        target: /photos
+        read_only: true
+        bind:
+          propagation: rslave
     restart: unless-stopped
