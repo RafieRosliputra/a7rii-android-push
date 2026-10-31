@@ -10,7 +10,7 @@ set -euo pipefail
 TNAS_HOST="${TNAS_HOST:-tnas}"
 TNAS_PATH="${TNAS_PATH:-/mnt/ssd/client-1month/livephoto}"
 REPO="${REPO:-https://github.com/RafieRosliputra/a7rii-android-push.git}"
-BRANCH="${BRANCH:-v3}"
+BRANCH="${BRANCH:-v4}"
 BASE=/mnt/ssd/livephoto
 MNT=/mnt/tnas-livephoto
 OWNER="${SUDO_USER:-truenas_admin}"
@@ -20,15 +20,16 @@ say() { printf '\n== %s\n' "$*"; }
 command -v midclt >/dev/null || { echo "This must run on TrueNAS m10"; exit 1; }
 
 say "Datasets"
-for ds in ssd/livephoto ssd/livephoto/data; do
+for ds in ssd/livephoto ssd/livephoto/data ssd/livephoto/models; do
   if midclt call pool.dataset.query "[[\"id\",\"=\",\"$ds\"]]" | grep -q "\"$ds\""; then echo "$ds exists"
   else midclt call pool.dataset.create "{\"name\":\"$ds\",\"share_type\":\"APPS\"}" >/dev/null && echo "$ds created"; fi
 done
-chown 568:568 "$BASE/data"
+chown 568:568 "$BASE/data" "$BASE/models"
 
 say "Code ($REPO, branch $BRANCH)"
 if [ -d "$BASE/app/.git" ]; then
-  sudo -u "$OWNER" git -C "$BASE/app" fetch -q origin "$BRANCH" && sudo -u "$OWNER" git -C "$BASE/app" checkout -q "$BRANCH" && sudo -u "$OWNER" git -C "$BASE/app" reset -q --hard "origin/$BRANCH"
+  sudo -u "$OWNER" git -C "$BASE/app" fetch -q origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" \
+    && sudo -u "$OWNER" git -C "$BASE/app" checkout -q -B "$BRANCH" "origin/$BRANCH"
 else
   rm -rf "$BASE/app"
   URL="$REPO"; [ -n "${GITHUB_TOKEN:-}" ] && URL="${REPO/https:\/\//https://x-access-token:$GITHUB_TOKEN@}"
@@ -44,27 +45,11 @@ if [ ! -f "$ENV" ]; then
   cat > "$ENV" <<'EOF'
 # JS Live Photo secrets (not in git). Edit, then: midclt call -j app.redeploy livephoto
 ADMIN_EMAIL=rafierosliputra@gmail.com
-# Google Cloud Console > APIs & Services > Credentials > OAuth client ID (Web), origin https://live.johorstudio.com
-GOOGLE_CLIENT_ID=
-# email.johorstudio.com > Admin > API keys > app "livephoto"
-MAIL_API_KEY=
 WHATSAPP=60127983745
 CONTACT_URL=https://johorstudio.com/#contact
 EOF
-  echo "created $ENV  <- fill in GOOGLE_CLIENT_ID and MAIL_API_KEY"
+  echo "created $ENV"
 else echo "$ENV exists (kept)"; fi
-# Values handed over by deploy/install.sh (file deleted after use)
-SECRETS="${SECRETS_FILE:-}"
-if [ -n "$SECRETS" ] && [ -f "$SECRETS" ]; then
-  while IFS='=' read -r k v; do
-    [ -n "$k" ] && [ -n "$v" ] || continue
-    if grep -q "^$k=" "$ENV"; then sed -i "s|^$k=.*|$k=$v|" "$ENV"; else echo "$k=$v" >> "$ENV"; fi
-    echo "set $k"
-  done < "$SECRETS"
-  rm -f "$SECRETS"
-fi
-grep -q '^GOOGLE_CLIENT_ID=.\+' "$ENV" || echo "NOTE: GOOGLE_CLIENT_ID still empty (email code login still works)"
-grep -q '^MAIL_API_KEY=.\+' "$ENV" || echo "NOTE: MAIL_API_KEY still empty -> login codes cannot be emailed yet"
 chown 568:568 "$ENV"; chmod 600 "$ENV"
 
 say "NFS mount $TNAS_HOST:$TNAS_PATH -> $MNT"

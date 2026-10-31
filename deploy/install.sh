@@ -1,7 +1,7 @@
 #!/bin/bash
 # One command from the Mac: installs JS Live Photo v3 on tnas (photos + NFS) and m10 (app).
 #   cd <this repo, branch v3> && ./deploy/install.sh
-# Asks for sudo passwords on the TrueNAS boxes, the Google Client ID and the JohorStudio Mail API key.
+# Asks for the sudo passwords on the TrueNAS boxes. Safe to run again (also upgrades v3 -> v4).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 KEY="${SSH_KEY:-$HOME/.ssh/truenas_claude}"
@@ -29,20 +29,14 @@ say "3/5 tnas: dataset livephoto + NFS share untuk m10 ($M10_TS_IP)"
 scp -q "${SSHO[@]}" deploy/setup-tnas.sh "$TNAS:/tmp/setup-tnas.sh"
 ssh -t "${SSHO[@]}" "$TNAS" "sudo bash /tmp/setup-tnas.sh $M10_TS_IP; rm -f /tmp/setup-tnas.sh"
 
-say "4/5 API key JohorStudio Mail (tekan Enter untuk langkau, boleh isi kemudian)"
-GCID=""  # Google Client ID is set in deploy/compose.yaml
-read -rsp "JohorStudio Mail API key (app livephoto, tak dipapar): " MKEY; echo
+say "4/5 Akses GitHub (repo private)"
 GH=""
 command -v gh >/dev/null && GH=$(gh auth token 2>/dev/null || true)
 [ -z "$GH" ] && read -rsp "GitHub token (Enter jika repo public): " GH && echo
-SEC=$(mktemp); chmod 600 "$SEC"
-[ -n "$GCID" ] && echo "GOOGLE_CLIENT_ID=$GCID" >> "$SEC"
-[ -n "$MKEY" ] && echo "MAIL_API_KEY=$MKEY" >> "$SEC"
-scp -q "${SSHO[@]}" "$SEC" "$M10:/tmp/livephoto.secrets"; rm -f "$SEC"
 scp -q "${SSHO[@]}" deploy/setup-m10.sh "$M10:/tmp/setup-m10.sh"
 
 say "5/5 m10: kod, mount NFS, app TrueNAS livephoto"
-ssh -t "${SSHO[@]}" "$M10" "sudo SECRETS_FILE=/tmp/livephoto.secrets TNAS_HOST=$TNAS_IP GITHUB_TOKEN='$GH' bash /tmp/setup-m10.sh; rm -f /tmp/setup-m10.sh /tmp/livephoto.secrets"
+ssh -t "${SSHO[@]}" "$M10" "sudo TNAS_HOST=$TNAS_IP GITHUB_TOKEN='$GH' bash /tmp/setup-m10.sh; rm -f /tmp/setup-m10.sh"
 
 say "Semak dari internet"
 if curl -sf -m 10 https://live.johorstudio.com/auth/config >/dev/null; then echo "https://live.johorstudio.com OK"

@@ -20,8 +20,9 @@ services:
       PHOTOS_DIR: /photos
       REQUIRE_STORAGE_MARKER: "1"
       PUBLIC_URL: https://live.johorstudio.com
-      # Admin login = Cloudflare Access app "livephoto admin" (paths /admin, /api/admin). ACCESS_AUD is in livephoto.env.
+      # Admin login = Cloudflare Access app "JS Live Photo Admin" (live.johorstudio.com/admin + /api/admin)
       ACCESS_TEAM_DOMAIN: johorstudio.cloudflareaccess.com
+      ACCESS_AUD: 0a2674c993f1beec5a154842827963543acb1639ce753bae7140baadcf24eecb
       ADMIN_EMAILS: rafierosliputra@gmail.com,johorstudio@gmail.com
       MODERATOR_URL: http://moderator:8096
     ports:
