@@ -1,29 +1,27 @@
 package com.johorstudio.tether;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
-import android.content.ContentResolver;
-import android.content.ContentValues;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.DocumentsContract;
-import android.provider.MediaStore;
+import android.text.InputType;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
-import android.app.AlertDialog;
-import android.content.DialogInterface;
-import android.text.InputType;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.CompoundButton;
@@ -33,552 +31,516 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.IOException;
-import java.io.OutputStream;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.text.SimpleDateFormat;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Date;
-import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Locale;
 
-public class MainActivity extends Activity {
+/**
+ * JS Tether v3 (JS Live Photo): Log masuk -> senarai EVENTS -> tether live.
+ * The camera work and uploads run in TetherService so they continue in the background.
+ */
+public class MainActivity extends Activity implements TetherService.Listener {
     private static final String ACTION_USB_PERMISSION = "com.johorstudio.tether.USB_PERMISSION";
     private static final int REQ_PICK_FOLDER = 42;
-    private static final int SONY_IN_MEMORY_HANDLE = 0xFFFFC001;
+
+    // JohorStudio.com colours
+    private static final int BG = Color.rgb(22, 28, 31), CARD = Color.rgb(32, 39, 43), TEAL = Color.rgb(31, 111, 104),
+            TEAL_LIGHT = Color.rgb(108, 196, 185), MUTED = Color.rgb(150, 165, 168), RED = Color.rgb(224, 86, 78),
+            GREEN = Color.rgb(120, 220, 150), AMBER = Color.rgb(255, 190, 120);
 
     private UsbManager usb;
     private SharedPreferences prefs;
-    private TextView tvCamera, tvPull, tvFolder, tvCount, tvLog;
+    private String screen = "";
+    // live screen views
+    private TextView tvCamera, tvServer, tvStage, tvCounts, tvLog, tvFolder;
     private ScrollView logScroll;
-    private final ArrayDeque<String> logLines = new ArrayDeque<>();
-    private volatile Worker worker;
-    private int savedCount = 0;
-    private CheckBox cbNas;
-    private TextView tvNas, tvNasFolder, tvNasCount;
-    private NasUploader uploader;
-    private int nasUploadedCount = 0;
 
-    // ------------------------------------------------------------------ UI
-
-    @Override
-    protected void onCreate(Bundle b) {
+    @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
         usb = (UsbManager) getSystemService(Context.USB_SERVICE);
-        prefs = getSharedPreferences("tether", MODE_PRIVATE);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        buildUi();
-
+        prefs = App.prefs(this);
         IntentFilter f = new IntentFilter();
         f.addAction(ACTION_USB_PERMISSION);
         f.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
         f.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(usbReceiver, f, Context.RECEIVER_EXPORTED);
         else registerReceiver(usbReceiver, f);
-
-        refreshFolderLabel();
-        startUploader();
-        refreshNasLabels();
-        if (cbNas.isChecked()) setNas(nasConfig().valid() ? "sedia (sambung bila ada gambar)" : "belum disetkan", false);
         handleIntent(getIntent());
     }
 
-    private TextView label(String text, float size, boolean bold) {
-        TextView t = new TextView(this);
-        t.setText(text);
-        t.setTextSize(size);
-        t.setTextColor(Color.WHITE);
-        if (bold) t.setTypeface(Typeface.DEFAULT_BOLD);
-        t.setPadding(0, dp(6), 0, dp(6));
-        return t;
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIntent(intent);
     }
+
+    @Override protected void onResume() {
+        super.onResume();
+        TetherService.setListener(this);
+        applyScreenOptions();
+        onChanged();
+    }
+
+    @Override protected void onPause() {
+        TetherService.setListener(null);
+        super.onPause();
+    }
+
+    @Override protected void onDestroy() {
+        try { unregisterReceiver(usbReceiver); } catch (Exception ignored) {}
+        super.onDestroy();
+    }
+
+    @Override public void onBackPressed() {
+        if ("live".equals(screen)) showEvents();
+        else moveTaskToBack(true); // keep the service running
+    }
+
+    private void handleIntent(Intent intent) {
+        Uri data = intent == null ? null : intent.getData();
+        if (data != null && "jstether".equals(data.getScheme()) && "auth".equals(data.getHost())) {
+            String token = data.getQueryParameter("token");
+            if (token != null && !token.isEmpty()) {
+                prefs.edit().putString("token", token).apply();
+                TetherService s = TetherService.get();
+                if (s != null) s.apiChanged();
+                toast("Log masuk berjaya");
+            }
+        }
+        UsbDevice d = intent == null ? null : (UsbDevice) intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+        if (App.token(this) == null) { showLogin(); return; }
+        if (d != null) { askUsb(d); showLive(); return; }
+        if (screen.isEmpty()) { if (prefs.getString("event_id", "").isEmpty()) showEvents(); else showLive(); }
+        else if ("login".equals(screen)) showEvents();
+    }
+
+    // ------------------------------------------------------------------ small UI kit
 
     private int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density + 0.5f); }
 
-    private void buildUi() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(18, 18, 20));
-        root.setPadding(dp(20), dp(32), dp(20), dp(20));
+    private TextView text(String s, float size, int color, boolean bold) {
+        TextView t = new TextView(this);
+        t.setText(s);
+        t.setTextSize(size);
+        t.setTextColor(color);
+        if (bold) t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setPadding(0, dp(4), 0, dp(4));
+        return t;
+    }
 
-        root.addView(label("JS Tether", 24, true));
-        TextView sub = label("v2.0 · Sony A7R II → telefon → TrueNAS", 12, false);
-        sub.setTextColor(Color.GRAY);
-        root.addView(sub);
+    private Button button(String s, boolean primary, View.OnClickListener l) {
+        Button b = new Button(this);
+        b.setText(s);
+        b.setAllCaps(false);
+        b.setTextColor(Color.WHITE);
+        GradientDrawable g = new GradientDrawable();
+        g.setCornerRadius(dp(8));
+        if (primary) g.setColor(TEAL); else { g.setColor(CARD); g.setStroke(dp(1), Color.rgb(70, 82, 87)); }
+        b.setBackground(g);
+        b.setOnClickListener(l);
+        return b;
+    }
 
-        tvCamera = label("Kamera: tidak bersambung", 17, true);
-        tvCamera.setTextColor(Color.rgb(255, 120, 120));
-        tvPull = label("Status: -", 16, false);
-        tvCount = label("Gambar disimpan: 0", 15, false);
-        tvFolder = label("Folder telefon: -", 13, false);
-        root.addView(tvCamera);
-        root.addView(tvPull);
-        root.addView(tvCount);
+    private LinearLayout column() {
+        LinearLayout l = new LinearLayout(this);
+        l.setOrientation(LinearLayout.VERTICAL);
+        return l;
+    }
+
+    private LinearLayout card() {
+        LinearLayout l = column();
+        GradientDrawable g = new GradientDrawable();
+        g.setCornerRadius(dp(10));
+        g.setColor(CARD);
+        l.setBackground(g);
+        l.setPadding(dp(14), dp(10), dp(14), dp(10));
+        return l;
+    }
+
+    private LinearLayout row(View... views) {
+        LinearLayout r = new LinearLayout(this);
+        r.setOrientation(LinearLayout.HORIZONTAL);
+        for (int i = 0; i < views.length; i++) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(48), 1f);
+            lp.setMargins(i == 0 ? 0 : dp(4), dp(4), i == views.length - 1 ? 0 : dp(4), dp(4));
+            r.addView(views[i], lp);
+        }
+        return r;
+    }
+
+    private LinearLayout page(String title, String sub) {
+        LinearLayout root = column();
+        root.setBackgroundColor(BG);
+        root.setPadding(dp(18), dp(28), dp(18), dp(14));
+        TextView brand = text("JOHORSTUDIO.COM · LIVE", 12, TEAL_LIGHT, true);
+        brand.setLetterSpacing(0.1f);
+        root.addView(brand);
+        root.addView(text(title, 24, Color.WHITE, true));
+        if (sub != null) root.addView(text(sub, 13, MUTED, false));
+        return root;
+    }
+
+    private void space(LinearLayout l, int h) { View v = new View(this); l.addView(v, new LinearLayout.LayoutParams(1, dp(h))); }
+
+    private void toast(final String s) {
+        runOnUiThread(new Runnable() { @Override public void run() { Toast.makeText(MainActivity.this, s, Toast.LENGTH_LONG).show(); } });
+    }
+
+    private interface Bg { Object run() throws Exception; }
+    private interface Done { void ok(Object r); }
+
+    /** Run an API call off the UI thread. A 401 means the login expired: back to the login screen. */
+    private void bg(final Bg work, final Done done) {
+        new Thread(new Runnable() { @Override public void run() {
+            try {
+                final Object r = work.run();
+                runOnUiThread(new Runnable() { @Override public void run() { done.ok(r); } });
+            } catch (final LiveApi.ApiException e) {
+                runOnUiThread(new Runnable() { @Override public void run() {
+                    if (e.status == 401) { prefs.edit().remove("token").apply(); toast("Sila log masuk semula"); showLogin(); }
+                    else toast(e.getMessage());
+                }});
+            } catch (final Exception e) {
+                toast("Ralat: " + e.getMessage());
+            }
+        }}).start();
+    }
+
+    // ------------------------------------------------------------------ login
+
+    private void showLogin() {
+        screen = "login";
+        LinearLayout root = page("Log masuk", "App jurugambar untuk live.johorstudio.com");
+        space(root, 16);
+        root.addView(text("Log masuk dengan akaun Google atau kod 6 digit yang dihantar ke email. Hanya email yang admin tambah boleh masuk. Log masuk kekal 30 hari.", 15, Color.WHITE, false));
+        space(root, 12);
+        root.addView(button("Log masuk", true, new View.OnClickListener() { @Override public void onClick(View v) {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(App.serverUrl(MainActivity.this) + "/login?app=1")));
+        }}), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
+        space(root, 8);
+        root.addView(button("Tetapan server", false, new View.OnClickListener() { @Override public void onClick(View v) { serverSettings(); } }),
+                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
+        space(root, 12);
+        root.addView(text("Server: " + App.serverUrl(this), 12, MUTED, false));
+        setContentView(root);
+    }
+
+    private void serverSettings() {
+        LinearLayout f = column();
+        f.setPadding(dp(20), dp(8), dp(20), 0);
+        f.addView(text("Alamat awam", 12, Color.GRAY, false));
+        final EditText eUrl = new EditText(this);
+        eUrl.setSingleLine(true);
+        eUrl.setText(App.serverUrl(this));
+        f.addView(eUrl);
+        f.addView(text("Alamat Tailscale (admin sahaja, cuba dulu; kosongkan jika tiada)", 12, Color.GRAY, false));
+        final EditText eFast = new EditText(this);
+        eFast.setSingleLine(true);
+        eFast.setHint("http://m10:8095");
+        eFast.setText(App.fastUrl(this));
+        f.addView(eFast);
+        new AlertDialog.Builder(this).setTitle("Tetapan server").setView(f)
+                .setPositiveButton("Simpan", new DialogInterface.OnClickListener() { @Override public void onClick(DialogInterface d, int w) {
+                    String u = eUrl.getText().toString().trim();
+                    prefs.edit().putString("server_url", u.isEmpty() ? LiveApi.DEFAULT_URL : u)
+                            .putString("fast_url", eFast.getText().toString().trim()).apply();
+                    TetherService s = TetherService.get();
+                    if (s != null) s.apiChanged();
+                    if ("login".equals(screen)) showLogin();
+                }})
+                .setNegativeButton("Batal", null).show();
+    }
+
+    // ------------------------------------------------------------------ events
+
+    private void showEvents() {
+        screen = "events";
+        final LinearLayout root = page("EVENTS", null);
+        final TextView who = text("…", 13, MUTED, false);
+        root.addView(who);
+        root.addView(row(
+                button("+ EVENT baru", true, new View.OnClickListener() { @Override public void onClick(View v) { newEvent(); } }),
+                button("Muat semula", false, new View.OnClickListener() { @Override public void onClick(View v) { showEvents(); } })));
+        final LinearLayout list = column();
+        ScrollView sv = new ScrollView(this);
+        sv.addView(list);
+        root.addView(sv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        root.addView(row(
+                button("Tetapan server", false, new View.OnClickListener() { @Override public void onClick(View v) { serverSettings(); } }),
+                button("Log keluar", false, new View.OnClickListener() { @Override public void onClick(View v) { logout(); } })));
+        setContentView(root);
+        list.addView(text("Memuat…", 14, MUTED, false));
+
+        final LiveApi api = App.api(this);
+        if (api == null) { showLogin(); return; }
+        bg(new Bg() { @Override public Object run() throws Exception {
+            JSONObject me = api.me();
+            return new Object[]{me, api.events()};
+        }}, new Done() { @Override public void ok(Object r) {
+            if (!"events".equals(screen)) return;
+            Object[] a = (Object[]) r;
+            JSONObject me = ((JSONObject) a[0]).optJSONObject("user");
+            JSONArray events = (JSONArray) a[1];
+            who.setText(me.optString("email") + " · " + ("admin".equals(me.optString("role")) ? "Admin (nampak semua event)" : "Jurugambar")
+                    + (((JSONObject) a[0]).optBoolean("storageOnline", true) ? "" : "\n⚠ Storan server offline"));
+            list.removeAllViews();
+            if (events == null || events.length() == 0) list.addView(text("Tiada event lagi. Tekan + EVENT baru.", 14, MUTED, false));
+            else for (int i = 0; i < events.length(); i++) list.addView(eventCard(events.optJSONObject(i)));
+        }});
+    }
+
+    private View eventCard(final JSONObject e) {
+        LinearLayout c = card();
+        String cur = prefs.getString("event_id", "");
+        boolean selected = cur.equals(e.optString("id"));
+        c.addView(text(e.optString("title") + (selected ? "  ●" : ""), 17, selected ? TEAL_LIGHT : Color.WHITE, true));
+        String slot = e.isNull("mySlot") ? "" : " · Photographer " + e.optInt("mySlot");
+        c.addView(text(prettyDate(e.optString("date")) + " · " + e.optInt("photoCount") + " gambar" + slot, 13, MUTED, false));
+        c.addView(text(e.optString("url").replaceFirst("^https?://", ""), 12, TEAL_LIGHT, false));
+        c.addView(row(
+                button("Pilih", true, new View.OnClickListener() { @Override public void onClick(View v) { selectEvent(e); } }),
+                button("Kongsi", false, new View.OnClickListener() { @Override public void onClick(View v) { share(e); } }),
+                button("QR", false, new View.OnClickListener() { @Override public void onClick(View v) {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(App.serverUrl(MainActivity.this) + "/admin#" + e.optString("id"))));
+                }})));
+        c.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { selectEvent(e); } });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, dp(6), 0, dp(6));
+        c.setLayoutParams(lp);
+        return c;
+    }
+
+    private static String prettyDate(String d) {
+        if (d == null || !d.matches("\\d{8}")) return "";
+        try { return new SimpleDateFormat("d MMM yyyy", new Locale("ms", "MY")).format(new SimpleDateFormat("yyyyMMdd", Locale.US).parse(d)); }
+        catch (Exception x) { return d; }
+    }
+
+    private void share(JSONObject e) {
+        Intent s = new Intent(Intent.ACTION_SEND).setType("text/plain")
+                .putExtra(Intent.EXTRA_TEXT, e.optString("title") + "\nGaleri live: " + e.optString("url"));
+        startActivity(Intent.createChooser(s, "Kongsi pautan galeri"));
+    }
+
+    private void selectEvent(JSONObject e) {
+        String old = prefs.getString("event_id", "");
+        TetherService s = TetherService.get();
+        if (!old.isEmpty() && !old.equals(e.optString("id")) && s != null && s.pending > 0) {
+            toast(s.pending + " gambar dalam giliran masih dihantar ke event sebelum ini");
+        }
+        prefs.edit().putString("event_id", e.optString("id")).putString("event_title", e.optString("title"))
+                .putString("event_folder", e.optString("folder")).putString("event_url", e.optString("url")).apply();
+        showLive();
+    }
+
+    private void newEvent() {
+        LinearLayout f = column();
+        f.setPadding(dp(20), dp(8), dp(20), 0);
+        f.addView(text("Tarikh (YYYYMMDD)", 12, Color.GRAY, false));
+        final EditText eDate = new EditText(this);
+        eDate.setInputType(InputType.TYPE_CLASS_NUMBER);
+        eDate.setText(new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date()));
+        f.addView(eDate);
+        f.addView(text("Nama event", 12, Color.GRAY, false));
+        final EditText eName = new EditText(this);
+        eName.setSingleLine(true);
+        eName.setHint("cth Konvo Tadika Bandar Putra");
+        f.addView(eName);
+        new AlertDialog.Builder(this).setTitle("EVENT baru").setView(f)
+                .setPositiveButton("Cipta", new DialogInterface.OnClickListener() { @Override public void onClick(DialogInterface d, int w) {
+                    final String date = eDate.getText().toString().trim(), name = eName.getText().toString().trim();
+                    if (!date.matches("\\d{8}") || name.isEmpty()) { toast("Isi tarikh YYYYMMDD dan nama event"); return; }
+                    final LiveApi api = App.api(MainActivity.this);
+                    bg(new Bg() { @Override public Object run() throws Exception { return api.createEvent(date, name); } },
+                        new Done() { @Override public void ok(Object r) { toast("Event dicipta"); selectEvent((JSONObject) r); } });
+                }})
+                .setNegativeButton("Batal", null).show();
+    }
+
+    private void logout() {
+        new AlertDialog.Builder(this).setMessage("Log keluar dari app ini? Gambar dalam giliran akan dihantar bila log masuk semula.")
+                .setPositiveButton("Log keluar", new DialogInterface.OnClickListener() { @Override public void onClick(DialogInterface d, int w) {
+                    final LiveApi api = App.api(MainActivity.this);
+                    if (api != null) new Thread(new Runnable() { @Override public void run() { api.logout(); } }).start();
+                    prefs.edit().remove("token").apply();
+                    TetherService s = TetherService.get();
+                    if (s != null) s.apiChanged();
+                    showLogin();
+                }}).setNegativeButton("Batal", null).show();
+    }
+
+    // ------------------------------------------------------------------ live tether
+
+    private void showLive() {
+        screen = "live";
+        LinearLayout root = page(prefs.getString("event_title", "Tiada event"), prefs.getString("event_url", "").replaceFirst("^https?://", ""));
+
+        LinearLayout st = card();
+        tvCamera = text("Kamera: -", 16, RED, true);
+        tvServer = text("Server: -", 14, AMBER, false);
+        tvStage = text("-", 14, Color.WHITE, false);
+        tvCounts = text("Disimpan 0 · WebP/Upload giliran 0 · Dihantar 0", 14, Color.WHITE, true);
+        st.addView(tvCamera); st.addView(tvServer); st.addView(tvStage); st.addView(tvCounts);
+        root.addView(st);
+
+        final Button quality = button("Format: " + App.qualityLabel(prefs.getInt("quality", 50)), false, null);
+        quality.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { chooseQuality(quality); } });
+        root.addView(row(quality,
+                button("Tukar event", false, new View.OnClickListener() { @Override public void onClick(View v) { showEvents(); } })));
+        root.addView(row(
+                button("Sambung semula kamera", false, new View.OnClickListener() { @Override public void onClick(View v) {
+                    TetherService s = TetherService.get();
+                    if (s == null) findCamera(); else s.reconnect();
+                }}),
+                button("Cuba hantar sekarang", false, new View.OnClickListener() { @Override public void onClick(View v) {
+                    TetherService s = TetherService.get();
+                    if (s != null) s.retryNow();
+                }})));
+
+        root.addView(toggle("Hantar ke server", "upload_on", true));
+        root.addView(toggle("Skrin sentiasa ON", "keep_screen", true));
+        root.addView(toggle("Kecerahan minimum (bila app dibuka)", "dim", false));
+
+        tvFolder = text(folderLabel(), 12, MUTED, false);
+        tvFolder.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { pickFolder(); } });
         root.addView(tvFolder);
 
-        Button pick = new Button(this);
-        pick.setText("Folder telefon");
-        pick.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                        | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-                startActivityForResult(i, REQ_PICK_FOLDER);
-            }
-        });
-        Button reconnect = new Button(this);
-        reconnect.setText("Sambung semula kamera");
-        reconnect.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                final Worker old = worker;
-                stopWorker();
-                new Thread(new Runnable() {
-                    @Override public void run() {
-                        if (old != null) try { old.join(3000); } catch (InterruptedException ignored) {}
-                        ui(new Runnable() { @Override public void run() { findAndConnect(); } });
-                    }
-                }).start();
-            }
-        });
-        root.addView(row(pick, reconnect));
-
-        // ---- TrueNAS section
-        TextView nasTitle = label("TrueNAS (SMB melalui Tailscale)", 14, true);
-        nasTitle.setTextColor(Color.rgb(120, 180, 255));
-        nasTitle.setPadding(0, dp(14), 0, dp(2));
-        root.addView(nasTitle);
-
-        cbNas = new CheckBox(this);
-        cbNas.setText("Hantar setiap gambar ke TrueNAS");
-        cbNas.setTextColor(Color.WHITE);
-        cbNas.setChecked(prefs.getBoolean("nas_on", false));
-        cbNas.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
-            @Override public void onCheckedChanged(CompoundButton b, boolean on) {
-                prefs.edit().putBoolean("nas_on", on).apply();
-                if (on && !nasConfig().valid()) showNasSettings();
-                refreshNasLabels();
-            }
-        });
-        root.addView(cbNas);
-
-        tvNas = label("NAS: -", 15, false);
-        tvNasFolder = label("Folder NAS: -", 13, false);
-        tvNasCount = label("Dihantar ke NAS: 0 · Giliran: 0", 13, false);
-        root.addView(tvNas);
-        root.addView(tvNasFolder);
-        root.addView(tvNasCount);
-
-        Button nasSet = new Button(this);
-        nasSet.setText("Tetapan & sambung");
-        nasSet.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showNasSettings(); }
-        });
-        Button nasDir = new Button(this);
-        nasDir.setText("Folder NAS");
-        nasDir.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                if (!nasConfig().valid()) { showNasSettings(); return; }
-                browseNas(nasConfig().dir);
-            }
-        });
-        root.addView(row(nasSet, nasDir));
-
-        TextView logTitle = label("Log", 13, true);
-        logTitle.setTextColor(Color.GRAY);
-        root.addView(logTitle);
-
+        root.addView(text("Log", 12, MUTED, true));
         logScroll = new ScrollView(this);
         tvLog = new TextView(this);
         tvLog.setTextSize(11);
         tvLog.setTypeface(Typeface.MONOSPACE);
-        tvLog.setTextColor(Color.rgb(170, 170, 170));
+        tvLog.setTextColor(Color.rgb(170, 180, 182));
         logScroll.addView(tvLog);
         root.addView(logScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-
         setContentView(root);
-    }
 
-    private LinearLayout row(View a, View b) {
-        LinearLayout r = new LinearLayout(this);
-        r.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(52), 1f);
-        lp.setMargins(0, 0, dp(4), 0);
-        r.addView(a, lp);
-        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(0, dp(52), 1f);
-        lp2.setMargins(dp(4), 0, 0, 0);
-        r.addView(b, lp2);
-        return r;
-    }
-
-    private void ui(Runnable r) { runOnUiThread(r); }
-
-    // ------------------------------------------------------------------ TrueNAS
-
-    private NasUploader.Config nasConfig() {
-        NasUploader.Config c = new NasUploader.Config();
-        c.host = prefs.getString("nas_host", "");
-        c.share = prefs.getString("nas_share", "");
-        c.user = prefs.getString("nas_user", "");
-        c.pass = prefs.getString("nas_pass", "");
-        c.domain = prefs.getString("nas_domain", "");
-        c.dir = prefs.getString("nas_dir", "");
-        return c;
-    }
-
-    private void refreshNasLabels() {
-        NasUploader.Config c = nasConfig();
-        tvNasFolder.setText("Folder NAS: " + (c.valid()
-                ? "\\\\" + c.host + "\\" + c.share + (c.dir.isEmpty() ? "" : "\\" + c.dir.replace('/', '\\'))
-                : "belum disetkan"));
-        if (!cbNas.isChecked()) setNas("dimatikan", false);
-    }
-
-    private void setNas(final String text, final boolean ok) {
-        ui(new Runnable() { @Override public void run() {
-            tvNas.setText("NAS: " + text);
-            tvNas.setTextColor(ok ? Color.rgb(120, 230, 140) : Color.rgb(255, 190, 120));
-        }});
-    }
-
-    private void updateNasCount() {
-        ui(new Runnable() { @Override public void run() {
-            tvNasCount.setText("Dihantar ke NAS: " + nasUploadedCount + " · Giliran: " + (uploader == null ? 0 : uploader.pending()));
-        }});
-    }
-
-    private void startUploader() {
-        uploader = new NasUploader(getContentResolver(), nasConfig(), new NasUploader.Listener() {
-            @Override public void onNasStatus(String text, boolean ok) { setNas(text, ok); }
-            @Override public void onNasUploaded(String name, int total) {
-                nasUploadedCount = total;
-                log("NAS ✓ " + name);
-                updateNasCount();
-            }
-            @Override public void onNasQueue(int pending) { updateNasCount(); }
-            @Override public void onNasLog(String s) { log(s); }
-        });
-        uploader.start();
-    }
-
-    private EditText field(LinearLayout parent, String hint, String value, boolean password) {
-        TextView l = new TextView(this);
-        l.setText(hint);
-        l.setTextSize(12);
-        parent.addView(l);
-        EditText e = new EditText(this);
-        e.setSingleLine(true);
-        e.setText(value);
-        if (password) e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        parent.addView(e);
-        return e;
-    }
-
-    private void showNasSettings() {
-        NasUploader.Config c = nasConfig();
-        ScrollView sv = new ScrollView(this);
-        LinearLayout f = new LinearLayout(this);
-        f.setOrientation(LinearLayout.VERTICAL);
-        f.setPadding(dp(20), dp(8), dp(20), dp(8));
-        sv.addView(f);
-        final EditText eHost = field(f, "IP Tailscale / nama TrueNAS (cth 100.101.102.103 atau truenas)", c.host, false);
-        final EditText eShare = field(f, "Nama share SMB (cth photos)", c.share, false);
-        final EditText eUser = field(f, "Username TrueNAS", c.user, false);
-        final EditText ePass = field(f, "Password", c.pass, true);
-        final EditText eDom = field(f, "Domain / workgroup (biasanya kosong)", c.domain, false);
-
-        new AlertDialog.Builder(this)
-                .setTitle("Tetapan TrueNAS")
-                .setView(sv)
-                .setPositiveButton("Simpan & sambung", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        prefs.edit()
-                                .putString("nas_host", eHost.getText().toString().trim())
-                                .putString("nas_share", eShare.getText().toString().trim())
-                                .putString("nas_user", eUser.getText().toString().trim())
-                                .putString("nas_pass", ePass.getText().toString())
-                                .putString("nas_domain", eDom.getText().toString().trim())
-                                .apply();
-                        refreshNasLabels();
-                        uploader.setConfig(nasConfig());
-                        testNas();
-                    }
-                })
-                .setNegativeButton("Batal", null)
-                .show();
-    }
-
-    private interface SmbTask { Object run(SmbClient s) throws Exception; }
-    private interface SmbDone { void done(Object result); }
-
-    /** Run something with a fresh SMB connection on a background thread; result delivered on UI thread. */
-    private void withNas(final String what, final SmbTask task, final SmbDone done) {
-        final NasUploader.Config c = nasConfig();
-        if (!c.valid()) { toast("Isi tetapan TrueNAS dulu"); return; }
-        setNas(what + "…", true);
-        new Thread(new Runnable() {
-            @Override public void run() {
-                SmbClient s = new SmbClient(c.host, c.share, c.user, c.pass, c.domain);
-                s.setLogger(new SmbClient.Logger() { @Override public void log(String m) { MainActivity.this.log(m); } });
-                try {
-                    s.connect();
-                    final Object res = task.run(s);
-                    ui(new Runnable() { @Override public void run() { done.done(res); } });
-                } catch (final Exception e) {
-                    log("NAS: " + e.getMessage());
-                    setNas("ralat: " + e.getMessage(), false);
-                    toast("TrueNAS: " + e.getMessage());
-                } finally {
-                    s.close();
-                }
-            }
-        }).start();
-    }
-
-    private void testNas() {
-        withNas("menguji sambungan", new SmbTask() {
-            @Override public Object run(SmbClient s) throws Exception { return s.list("").size(); }
-        }, new SmbDone() {
-            @Override public void done(Object r) {
-                setNas("bersambung ✓ (" + r + " item dalam share)", true);
-                toast("Berjaya sambung ke TrueNAS");
-                if (prefs.getString("nas_dir", "").isEmpty()) browseNas("");
-            }
-        });
-    }
-
-    private static String parentOf(String dir) {
-        String d = dir.replace('\\', '/');
-        int i = d.lastIndexOf('/');
-        return i <= 0 ? "" : d.substring(0, i);
-    }
-
-    private static String childOf(String dir, String name) {
-        return dir.isEmpty() ? name : dir + "/" + name;
-    }
-
-    /** Folder browser on the NAS: open sub-folders, go up, create a new folder, choose. */
-    private void browseNas(final String dir) {
-        withNas("membaca folder", new SmbTask() {
-            @Override public Object run(SmbClient s) throws Exception { return s.list(dir); }
-        }, new SmbDone() {
-            @SuppressWarnings("unchecked")
-            @Override public void done(Object r) {
-                setNas("bersambung ✓", true);
-                final List<String> folders = new ArrayList<>();
-                for (SmbClient.Entry e : (List<SmbClient.Entry>) r) if (e.dir && !e.name.startsWith(".")) folders.add(e.name);
-                Collections.sort(folders, String.CASE_INSENSITIVE_ORDER);
-                final boolean hasUp = !dir.isEmpty();
-                final List<String> items = new ArrayList<>();
-                if (hasUp) items.add("⬆  ..");
-                for (String n : folders) items.add("📁  " + n);
-                if (folders.isEmpty()) items.add("(tiada sub-folder)");
-
-                new AlertDialog.Builder(MainActivity.this)
-                        .setTitle("\\" + nasConfig().share + (dir.isEmpty() ? "" : "\\" + dir.replace('/', '\\')))
-                        .setItems(items.toArray(new String[0]), new DialogInterface.OnClickListener() {
-                            @Override public void onClick(DialogInterface d, int which) {
-                                if (hasUp && which == 0) { browseNas(parentOf(dir)); return; }
-                                int idx = which - (hasUp ? 1 : 0);
-                                if (idx >= 0 && idx < folders.size()) browseNas(childOf(dir, folders.get(idx)));
-                                else browseNas(dir);
-                            }
-                        })
-                        .setPositiveButton("Pilih folder ini", new DialogInterface.OnClickListener() {
-                            @Override public void onClick(DialogInterface d, int w) {
-                                prefs.edit().putString("nas_dir", dir).apply();
-                                refreshNasLabels();
-                                uploader.setConfig(nasConfig());
-                                log("Folder NAS dipilih: \\" + nasConfig().share + "\\" + dir.replace('/', '\\'));
-                                if (!cbNas.isChecked()) cbNas.setChecked(true);
-                            }
-                        })
-                        .setNeutralButton("Folder baru", new DialogInterface.OnClickListener() {
-                            @Override public void onClick(DialogInterface d, int w) { newNasFolder(dir); }
-                        })
-                        .setNegativeButton("Batal", null)
-                        .show();
-            }
-        });
-    }
-
-    private void newNasFolder(final String dir) {
-        final EditText e = new EditText(this);
-        e.setSingleLine(true);
-        e.setHint("cth Konvo Tadika 2026");
-        e.setText(new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date()) + " ");
-        e.setSelection(e.getText().length());
-        LinearLayout box = new LinearLayout(this);
-        box.setPadding(dp(20), dp(8), dp(20), 0);
-        box.addView(e, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        new AlertDialog.Builder(this)
-                .setTitle("Folder baru dalam \\" + (dir.isEmpty() ? nasConfig().share : dir.replace('/', '\\')))
-                .setView(box)
-                .setPositiveButton("Cipta", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        final String name = e.getText().toString().trim().replaceAll("[\\\\/:*?\"<>|]", "-");
-                        if (name.isEmpty()) { browseNas(dir); return; }
-                        final String path = childOf(dir, name);
-                        withNas("mencipta folder", new SmbTask() {
-                            @Override public Object run(SmbClient s) throws Exception { return s.mkdir(path); }
-                        }, new SmbDone() {
-                            @Override public void done(Object r) {
-                                log(Boolean.TRUE.equals(r) ? "Folder NAS dicipta: " + name : "Folder sudah wujud: " + name);
-                                browseNas(path);
-                            }
-                        });
-                    }
-                })
-                .setNegativeButton("Batal", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) { browseNas(dir); }
-                })
-                .show();
-    }
-
-    private void toast(final String s) {
-        ui(new Runnable() { @Override public void run() { Toast.makeText(MainActivity.this, s, Toast.LENGTH_LONG).show(); } });
-    }
-
-    private void setCamera(final String text, final boolean ok) {
-        ui(new Runnable() { @Override public void run() {
-            tvCamera.setText("Kamera: " + text);
-            tvCamera.setTextColor(ok ? Color.rgb(120, 230, 140) : Color.rgb(255, 120, 120));
-        }});
-    }
-
-    private void setPull(final String text) {
-        ui(new Runnable() { @Override public void run() { tvPull.setText("Status: " + text); } });
-    }
-
-    private void log(String s) {
-        final String line = new SimpleDateFormat("HH:mm:ss", Locale.US).format(new Date()) + "  " + s;
-        ui(new Runnable() { @Override public void run() {
-            logLines.addLast(line);
-            while (logLines.size() > 200) logLines.removeFirst();
+        applyScreenOptions();
+        if (TetherService.get() == null) findCamera();
+        onChanged();
+        TetherService s = TetherService.get();
+        if (s != null) {
             StringBuilder sb = new StringBuilder();
-            for (String l : logLines) sb.append(l).append('\n');
+            synchronized (s.logs) { for (String l : s.logs) sb.append(l).append('\n'); }
             tvLog.setText(sb);
-            logScroll.post(new Runnable() { @Override public void run() { logScroll.fullScroll(ScrollView.FOCUS_DOWN); } });
-        }});
+            scrollLog();
+        }
     }
 
-    // ------------------------------------------------------------------ folder
+    private CheckBox toggle(String label, final String key, boolean def) {
+        CheckBox cb = new CheckBox(this);
+        cb.setText(label);
+        cb.setTextColor(Color.WHITE);
+        cb.setChecked(prefs.getBoolean(key, def));
+        cb.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override public void onCheckedChanged(CompoundButton b, boolean on) {
+                prefs.edit().putBoolean(key, on).apply();
+                applyScreenOptions();
+            }
+        });
+        return cb;
+    }
 
-    @Override
-    protected void onActivityResult(int req, int res, Intent data) {
+    private void chooseQuality(final Button b) {
+        final String[] labels = new String[App.QUALITIES.length];
+        int cur = prefs.getInt("quality", 50), sel = 1;
+        for (int i = 0; i < labels.length; i++) {
+            labels[i] = App.qualityLabel(App.QUALITIES[i]) + (App.QUALITIES[i] == 50 ? " (default)" : App.QUALITIES[i] == 0 ? " (fail asal, besar)" : "");
+            if (App.QUALITIES[i] == cur) sel = i;
+        }
+        new AlertDialog.Builder(this).setTitle("Format hantar ke server")
+                .setSingleChoiceItems(labels, sel, new DialogInterface.OnClickListener() { @Override public void onClick(DialogInterface d, int w) {
+                    prefs.edit().putInt("quality", App.QUALITIES[w]).apply();
+                    b.setText("Format: " + App.qualityLabel(App.QUALITIES[w]));
+                    d.dismiss();
+                }}).show();
+    }
+
+    /** Screen on / minimum brightness. Android only lets an app dim the screen while it is in front. */
+    private void applyScreenOptions() {
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        boolean live = "live".equals(screen);
+        if (prefs.getBoolean("keep_screen", true)) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        lp.screenBrightness = live && prefs.getBoolean("dim", false) ? 0.01f : WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+        getWindow().setAttributes(lp);
+    }
+
+    @Override public void onChanged() {
+        if (!"live".equals(screen) || tvCamera == null) return;
+        TetherService s = TetherService.get();
+        if (s == null) {
+            tvCamera.setText("Kamera: tidak bersambung");
+            tvCamera.setTextColor(RED);
+            tvStage.setText("Sambungkan kamera (USB Connection: PC Remote)");
+            return;
+        }
+        tvCamera.setText("Kamera: " + s.camera);
+        tvCamera.setTextColor(s.cameraOk ? GREEN : RED);
+        tvServer.setText("Server: " + s.server);
+        tvServer.setTextColor(s.serverOk ? GREEN : AMBER);
+        tvStage.setText(s.stage);
+        tvCounts.setText("Disimpan " + s.saved + " · Giliran " + s.pending + " · Dihantar " + s.uploaded);
+    }
+
+    @Override public void onLog(String line) {
+        if (tvLog == null || !"live".equals(screen)) return;
+        CharSequence cur = tvLog.getText();
+        String all = cur + line + "\n";
+        if (all.length() > 40000) all = all.substring(all.length() - 30000);
+        tvLog.setText(all);
+        scrollLog();
+    }
+
+    private void scrollLog() {
+        logScroll.post(new Runnable() { @Override public void run() { logScroll.fullScroll(ScrollView.FOCUS_DOWN); } });
+    }
+
+    // ------------------------------------------------------------------ phone folder
+
+    private void pickFolder() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(i, REQ_PICK_FOLDER);
+    }
+
+    private String folderLabel() {
+        String s = prefs.getString("tree", null);
+        if (s == null) return "Folder telefon: Pictures/JS Tether/<event> (default) · ketik untuk tukar";
+        try {
+            String id = DocumentsContract.getTreeDocumentId(Uri.parse(s));
+            return "Folder telefon: " + (id.startsWith("primary:") ? "Storan dalaman/" + id.substring(8) : id.replace(':', '/')) + " · ketik untuk tukar";
+        } catch (Exception e) { return "Folder telefon: " + s; }
+    }
+
+    @Override protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
         if (req == REQ_PICK_FOLDER && res == RESULT_OK && data != null && data.getData() != null) {
             Uri tree = data.getData();
             try {
-                getContentResolver().takePersistableUriPermission(tree,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-            } catch (Exception e) { log("Gagal simpan kebenaran folder: " + e.getMessage()); }
+                getContentResolver().takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            } catch (Exception e) { toast("Gagal simpan kebenaran folder: " + e.getMessage()); }
             prefs.edit().putString("tree", tree.toString()).apply();
-            refreshFolderLabel();
-            log("Folder dipilih: " + prettyTree(tree));
+            if (tvFolder != null) tvFolder.setText(folderLabel());
         }
-    }
-
-    private Uri treeUri() {
-        String s = prefs.getString("tree", null);
-        return s == null ? null : Uri.parse(s);
-    }
-
-    private String prettyTree(Uri tree) {
-        try {
-            String id = DocumentsContract.getTreeDocumentId(tree);
-            if (id.startsWith("primary:")) return "Storan dalaman/" + id.substring(8);
-            return id.replace(':', '/');
-        } catch (Exception e) { return tree.toString(); }
-    }
-
-    private void refreshFolderLabel() {
-        Uri t = treeUri();
-        tvFolder.setText("Folder telefon: " + (t != null ? prettyTree(t)
-                : (Build.VERSION.SDK_INT >= 29 ? "Pictures/JS Tether (default)" : "belum dipilih")));
-    }
-
-    private static String mimeFor(String name) {
-        String n = name.toLowerCase(Locale.US);
-        if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
-        if (n.endsWith(".heif") || n.endsWith(".hif")) return "image/heif";
-        return "application/octet-stream"; // ARW etc: keep exact file name
-    }
-
-    private static class Target { Uri uri; OutputStream os; }
-
-    private Target openTarget(String name) throws IOException {
-        ContentResolver cr = getContentResolver();
-        Target t = new Target();
-        Uri tree = treeUri();
-        if (tree != null) {
-            Uri dir = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree));
-            t.uri = DocumentsContract.createDocument(cr, dir, mimeFor(name), name);
-            if (t.uri == null) throw new IOException("Gagal cipta fail dalam folder (pilih folder semula?)");
-        } else if (Build.VERSION.SDK_INT >= 29) {
-            ContentValues v = new ContentValues();
-            v.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
-            String mime = mimeFor(name);
-            v.put(MediaStore.MediaColumns.MIME_TYPE, mime.startsWith("image/") ? mime : "image/x-sony-arw");
-            v.put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/JS Tether");
-            t.uri = cr.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v);
-            if (t.uri == null) throw new IOException("MediaStore insert gagal");
-        } else {
-            throw new IOException("Sila pilih folder simpan dulu");
-        }
-        t.os = cr.openOutputStream(t.uri, "w");
-        if (t.os == null) throw new IOException("Tidak dapat buka fail untuk ditulis");
-        return t;
-    }
-
-    private void deleteTarget(Target t) {
-        try {
-            if (t.uri == null) return;
-            if (treeUri() != null) DocumentsContract.deleteDocument(getContentResolver(), t.uri);
-            else getContentResolver().delete(t.uri, null, null);
-        } catch (Exception ignored) {}
     }
 
     // ------------------------------------------------------------------ USB
 
-    @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        handleIntent(intent);
-    }
-
-    private void handleIntent(Intent intent) {
-        UsbDevice d = intent == null ? null : intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
-        if (d != null) connect(d); else findAndConnect();
-    }
-
-    private void findAndConnect() {
-        if (worker != null) return;
+    private void findCamera() {
         for (UsbDevice d : usb.getDeviceList().values()) {
-            if (Ptp.findPtpInterface(d) != null) { connect(d); return; }
+            if (Ptp.findPtpInterface(d) != null) { askUsb(d); return; }
         }
-        setCamera("tidak bersambung", false);
-        setPull("Sambungkan kamera dengan kabel USB-C/OTG");
     }
 
-    private void connect(UsbDevice d) {
-        if (worker != null) return;
-        if (!usb.hasPermission(d)) {
-            setCamera("meminta kebenaran USB…", false);
-            Intent i = new Intent(ACTION_USB_PERMISSION).setPackage(getPackageName());
-            int flags = Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0;
-            usb.requestPermission(d, PendingIntent.getBroadcast(this, 0, i, flags));
-            return;
-        }
-        worker = new Worker(d);
-        worker.start();
-    }
-
-    private void stopWorker() {
-        Worker w = worker;
-        worker = null;
-        if (w != null) w.shutdown();
+    private void askUsb(UsbDevice d) {
+        if (usb.hasPermission(d)) { TetherService.start(this, d); return; }
+        Intent i = new Intent(ACTION_USB_PERMISSION).setPackage(getPackageName());
+        int flags = Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0;
+        usb.requestPermission(d, PendingIntent.getBroadcast(this, 0, i, flags));
     }
 
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
@@ -586,219 +548,15 @@ public class MainActivity extends Activity {
             UsbDevice d = i.getParcelableExtra(UsbManager.EXTRA_DEVICE);
             String a = i.getAction();
             if (ACTION_USB_PERMISSION.equals(a)) {
-                if (d != null && i.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) connect(d);
-                else { setCamera("kebenaran USB ditolak", false); log("Kebenaran USB ditolak"); }
+                if (d != null && i.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) TetherService.start(MainActivity.this, d);
+                else toast("Kebenaran USB ditolak");
             } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(a)) {
-                Worker w = worker;
-                if (w != null && d != null && d.getDeviceName().equals(w.dev.getDeviceName())) {
-                    log("Kamera dicabut");
-                    stopWorker();
-                    setCamera("tidak bersambung", false);
-                    setPull("-");
-                }
+                TetherService s = TetherService.get();
+                if (s != null) s.detached(d);
             } else if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(a)) {
-                if (d != null && worker == null) connect(d);
+                if (d != null && Ptp.findPtpInterface(d) != null) askUsb(d);
             }
         }
     };
 
-    @Override
-    protected void onDestroy() {
-        stopWorker();
-        if (uploader != null) uploader.shutdown();
-        try { unregisterReceiver(usbReceiver); } catch (Exception ignored) {}
-        super.onDestroy();
-    }
-
-    // ------------------------------------------------------------------ worker
-
-    private class Worker extends Thread {
-        final UsbDevice dev;
-        volatile boolean running = true;
-        Ptp ptp;
-        final LinkedHashSet<String> recent = new LinkedHashSet<>();
-
-        Worker(UsbDevice d) { dev = d; setName("ptp-worker"); }
-
-        void shutdown() {
-            running = false;
-            interrupt();
-        }
-
-        @Override public void run() {
-            try {
-                setCamera("menyambung…", false);
-                ptp = Ptp.open(usb, dev);
-                ptp.setLogger(new Ptp.Logger() { @Override public void log(String s) { MainActivity.this.log(s); } });
-                log(String.format("USB %04X:%04X %s", dev.getVendorId(), dev.getProductId(), ptp.describe()));
-                log(String.format("Device status: 0x%04X", ptp.getDeviceStatus()));
-                ptp.drain();
-                Ptp.DeviceInfo di = null;
-                for (int attempt = 1; attempt <= 3 && running; attempt++) {
-                    try { di = ptp.getDeviceInfo(); break; }
-                    catch (IOException e) {
-                        log("Cubaan " + attempt + ": " + e.getMessage() + " → reset USB");
-                        ptp.resetDevice();
-                    }
-                }
-                if (di == null) throw new IOException("Kamera tidak membalas. Matikan & hidupkan kamera, kemudian cuba lagi");
-                String name = (di.manufacturer + " " + di.model).trim();
-                if (name.isEmpty()) name = dev.getProductName() != null ? dev.getProductName() : "Kamera";
-                log("Dijumpai: " + name + " (ext 0x" + Integer.toHexString(di.vendorExtId) + " " + di.vendorExtDesc + ")");
-                try { ptp.openSession(); }
-                catch (IOException e) {
-                    log("OpenSession: " + e.getMessage() + " → reset & cuba lagi");
-                    ptp.resetDevice();
-                    ptp.openSession();
-                }
-                boolean sony = di.supportsOp(Ptp.OC_Sony_SDIOConnect);
-                if (sony) {
-                    log("Mod PC Remote dikesan, handshake Sony…");
-                    try { ptp.sonyHandshake(); }
-                    catch (IOException e) { log("Handshake Sony: " + e.getMessage()); }
-                    setCamera(name + " ✓ (PC Remote)", true);
-                } else {
-                    setCamera(name + " ✓ (MTP/PTP)", true);
-                    if (dev.getVendorId() == 0x054C)
-                        log("Kamera dalam mod MTP. Untuk tether: Menu → USB Connection → PC Remote");
-                }
-                setPull("Menunggu gambar… (tekan shutter)");
-
-                boolean pending = false;
-                long pendingSince = 0, lastPoll = 0;
-                int errors = 0;
-                while (running) {
-                    Ptp.Event e = ptp.pollEvent(300);
-                    long now = System.currentTimeMillis();
-                    if (e != null) {
-                        int p0 = e.params.length > 0 ? e.params[0] : 0;
-                        if (e.code != 0xC203) log(String.format("Event 0x%04X p=0x%08X", e.code, p0));
-                        if (sony && (e.code == Ptp.EC_Sony_ObjectAdded || e.code == Ptp.EC_ObjectAdded)) {
-                            pending = true; pendingSince = now;
-                            setPull("Kamera sedang proses gambar…");
-                        } else if (!sony && e.code == Ptp.EC_ObjectAdded) {
-                            try { pull(p0, false); errors = 0; }
-                            catch (IOException ex) { errors = onImageError(ex, errors); }
-                        }
-                    }
-                    if (sony && (pending || now - lastPoll > 1500)) {
-                        lastPoll = now;
-                        try {
-                            int v = ptp.sonyObjectInMemory();
-                            if (v > 0x8000) {
-                                log(String.format("ObjectInMemory 0x%04X → tarik", v));
-                                drainSony();
-                                pending = false;
-                            } else if (pending && v < 0 && now - pendingSince > 1500) {
-                                log("ObjectInMemory tak dapat dibaca, cuba tarik terus");
-                                drainSony();
-                                pending = false;
-                            } else if (pending && now - pendingSince > 30000) {
-                                log("Tiada gambar dalam buffer kamera selepas 30 s (semak Still Img. Save Dest.)");
-                                pending = false;
-                                setPull("Menunggu gambar… (tekan shutter)");
-                            }
-                            errors = 0;
-                        } catch (IOException ex) {
-                            errors = onImageError(ex, errors);
-                        }
-                    }
-                }
-            } catch (Exception ex) {
-                if (running) {
-                    log("Ralat: " + ex.getMessage());
-                    setCamera("ralat sambungan", false);
-                    setPull("Cabut & sambung semula kamera, atau tekan 'Sambung semula'");
-                }
-            } finally {
-                if (ptp != null) { if (running) ptp.closeSession(); ptp.close(); }
-                if (worker == this) worker = null;
-            }
-        }
-
-        /** One failed image must not kill the session; only give up after repeated failures. */
-        private int onImageError(IOException ex, int errors) throws IOException {
-            errors++;
-            log("Ralat gambar (" + errors + "): " + ex.getMessage());
-            ptp.drain();
-            setPull("Ralat semasa tarik, menunggu gambar seterusnya…");
-            if (errors >= 5) throw new IOException("Terlalu banyak ralat berturut-turut");
-            return errors;
-        }
-
-        /** Sony keeps captured images in a queue at handle 0xFFFFC001; pull until it is empty. */
-        private void drainSony() throws IOException {
-            for (int i = 0; i < 20 && running; i++) {
-                if (!pull(SONY_IN_MEMORY_HANDLE, true)) break;
-                int v = ptp.sonyObjectInMemory();
-                if (v >= 0 && v <= 0x8000) break;
-            }
-            setPull("Menunggu gambar… (tekan shutter)");
-        }
-
-        /** @return true if a new file was saved */
-        private boolean pull(int handle, boolean sonyQueue) throws IOException {
-            Ptp.ObjectInfo oi = null;
-            for (int attempt = 0; attempt < (sonyQueue ? 5 : 2); attempt++) {
-                try { oi = ptp.getObjectInfo(handle); break; }
-                catch (IOException e) {
-                    if (!sonyQueue) { log(e.getMessage()); return false; }
-                    try { Thread.sleep(150); } catch (InterruptedException ie) { return false; }
-                }
-            }
-            if (oi == null) return false;
-            if (oi.format == 0x3001) return false; // folder
-            String fname = oi.filename.isEmpty() ? String.format("IMG_%08X.JPG", handle) : oi.filename;
-            if (!fname.matches("[A-Za-z0-9._ -]{1,64}"))
-                throw new IOException("Maklumat gambar rosak (nama fail tidak sah), cuba lagi");
-            String key = fname + "|" + oi.size;
-            if (recent.contains(key)) return false;
-
-            long size = oi.size & 0xFFFFFFFFL;
-            setPull("Menarik " + fname + " (" + mb(size) + ")…");
-            log("Menarik " + fname + " " + mb(size));
-            long t0 = System.currentTimeMillis();
-            Target t = openTarget(fname);
-            final String fn = fname;
-            final long[] lastUi = {0};
-            Ptp.Response r;
-            try {
-                r = ptp.getObject(handle, t.os, new Ptp.Progress() {
-                    @Override public void onProgress(long done, long total) {
-                        long now = System.currentTimeMillis();
-                        if (now - lastUi[0] > 200) {
-                            lastUi[0] = now;
-                            int pct = total > 0 ? (int) (done * 100 / total) : 0;
-                            setPull("Menarik " + fn + " " + pct + "%");
-                        }
-                    }
-                });
-                t.os.close();
-            } catch (IOException ex) {
-                try { t.os.close(); } catch (Exception ignored) {}
-                deleteTarget(t);
-                throw ex;
-            }
-            if (!r.ok()) {
-                deleteTarget(t);
-                log(String.format("GetObject gagal 0x%04X", r.code));
-                return false;
-            }
-            recent.add(key);
-            if (recent.size() > 100) recent.remove(recent.iterator().next());
-            double secs = Math.max(0.001, (System.currentTimeMillis() - t0) / 1000.0);
-            savedCount++;
-            final int c = savedCount;
-            ui(new Runnable() { @Override public void run() { tvCount.setText("Gambar disimpan: " + c); } });
-            setPull("Siap: " + fname);
-            log(String.format(Locale.US, "Disimpan %s (%.1f s, %.1f MB/s)", fname, secs, size / 1048576.0 / secs));
-            if (cbNas.isChecked() && uploader != null) {
-                uploader.enqueue(t.uri, fname, size);
-                updateNasCount();
-            }
-            return true;
-        }
-    }
-
-    private static String mb(long b) { return String.format(Locale.US, "%.1f MB", b / 1048576.0); }
 }
