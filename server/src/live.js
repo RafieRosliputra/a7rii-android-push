@@ -1,10 +1,12 @@
-// Server-Sent Events hub: one channel per event. Heartbeat keeps Cloudflare Tunnel from
-// closing idle streams (~100 s limit).
-const channels = new Map(); // eventId -> Set<res>
+// Server-Sent Events hub. Two channels per event:
+//   public  -> galleries and the big screen: only approved, visible photos
+//   staff   -> admin / organiser panels: every photo with its moderation status
+// Heartbeat keeps Cloudflare Tunnel from closing idle streams (~100 s limit).
+const channels = new Map(); // key -> Set<res>
 let photoToJson = (p) => p;
 export const setPhotoSerializer = (fn) => { photoToJson = fn; };
 
-export function subscribe(eventId, req, res) {
+export function subscribe(eventId, req, res, staff = false) {
   res.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
     'cache-control': 'no-store, no-transform',
@@ -12,21 +14,35 @@ export function subscribe(eventId, req, res) {
     'x-accel-buffering': 'no',
   });
   res.write('retry: 3000\n\n');
-  let set = channels.get(eventId);
-  if (!set) channels.set(eventId, (set = new Set()));
+  const key = (staff ? 'staff:' : 'pub:') + eventId;
+  let set = channels.get(key);
+  if (!set) channels.set(key, (set = new Set()));
   set.add(res);
   const hb = setInterval(() => res.write(': ping\n\n'), 20000);
-  const close = () => { clearInterval(hb); set.delete(res); if (!set.size) channels.delete(eventId); };
+  const close = () => { clearInterval(hb); set.delete(res); if (!set.size) channels.delete(key); };
   req.on('close', close);
   res.on('error', close);
 }
 
-export function publish(eventId, type, data) {
-  const set = channels.get(eventId);
+function send(key, type, data) {
+  const set = channels.get(key);
   if (!set) return;
-  const payload = type === 'photo' ? photoToJson(data) : data;
-  const msg = `event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`;
+  const msg = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const res of set) res.write(msg);
 }
 
-export const viewerCount = (eventId) => channels.get(eventId)?.size || 0;
+/** Non-photo events (remove, gone, event settings) go to both channels. */
+export function publish(eventId, type, data) {
+  send('pub:' + eventId, type, data);
+  send('staff:' + eventId, type, data);
+}
+
+/** A photo was added or changed: staff always see it; the public only when it is approved and visible. */
+export function publishPhoto(p) {
+  const j = photoToJson(p);
+  send('staff:' + p.event_id, 'photo', j);
+  if (p.status === 'approved' && !p.hidden) send('pub:' + p.event_id, 'photo', j);
+  else send('pub:' + p.event_id, 'remove', { id: p.id });
+}
+
+export const viewerCount = (eventId) => channels.get('pub:' + eventId)?.size || 0;

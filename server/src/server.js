@@ -8,6 +8,7 @@ import * as db from './db.js';
 import { router } from './api.js';
 import { HttpError, sendJson } from './http.js';
 import { startScanner, stopScanner } from './storage.js';
+import { startModeration, stopModeration } from './moderation.js';
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../public');
 const TYPES = {
@@ -18,8 +19,11 @@ const TYPES = {
 // Clean URLs for the pages.
 const PAGES = [
   [/^\/$/, 'index.html'],
-  [/^\/login\/?$/, 'login.html'],
+  [/^\/c\/\d{6}\/?$/, 'index.html'],        // QR on the big screen: code filled in
   [/^\/admin\/?$/, 'admin.html'],
+  [/^\/panel\/?$/, 'admin.html'],              // organiser panel (client code), same page, fewer powers
+  [/^\/shoot\/?$/, 'shoot.html'],
+  [/^\/show\/[0-9a-f-]{36}\/?$/, 'show.html'],
   [/^\/e\/[a-z0-9]{6,16}\/?$/, 'gallery.html'],
 ];
 
@@ -70,12 +74,13 @@ export function handler(req, res) {
 export function start() {
   db.openDb();
   startScanner();
+  startModeration();
   const server = http.createServer(handler);
   server.requestTimeout = 0;           // long SSE streams and slow 4G chunk uploads
   server.headersTimeout = 60000;
   server.keepAliveTimeout = 65000;
   server.listen(config.port, config.host, () => console.log(`JS Live Photo on http://${config.host}:${config.port} (photos: ${config.photosDir})`));
-  const stop = () => { stopScanner(); server.close(); db.closeDb(); process.exit(0); };
+  const stop = () => { stopScanner(); stopModeration(); server.close(); db.closeDb(); process.exit(0); };
   process.on('SIGTERM', stop);
   process.on('SIGINT', stop);
   return server;

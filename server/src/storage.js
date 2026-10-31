@@ -7,7 +7,7 @@ import { config, EVENTS_DIR, META_FILE, PUBLIC_UPLOAD, STORAGE_MARKER, slotFolde
 import * as db from './db.js';
 import { imageSizeOfFile } from './imageinfo.js';
 import { shortToken, uuid } from './http.js';
-import { publish } from './live.js';
+import { publish, publishPhoto } from './live.js';
 
 export const IMAGE_RE = /\.(webp|jpe?g)$/i;
 export const THUMB_SIZES = { 480: 1, 1600: 2 };
@@ -75,11 +75,11 @@ export function readMeta(dir) {
   try { return JSON.parse(fs.readFileSync(path.join(dir, META_FILE), 'utf8')); } catch { return null; }
 }
 export function writeMeta(ev) {
-  const owner = ev.owner_id ? db.getUser(ev.owner_id) : null;
   const meta = {
-    id: ev.id, owner: owner?.email || null, token: ev.public_token,
-    public_upload: !!ev.public_upload_on, created: new Date(ev.created_at).toISOString(),
-    members: db.listMembers(ev.id).map((m) => ({ email: m.email, slot: m.slot })),
+    id: ev.id, token: ev.public_token, organiser: ev.organiser || '', created: new Date(ev.created_at).toISOString(),
+    codes: { public: ev.public_code, photographer: ev.photo_code, client: ev.client_code },
+    public_upload: !!ev.public_upload_on,
+    photographers: db.listPhotographers(ev.id).map((p) => ({ slot: p.slot, name: p.name })),
   };
   const file = path.join(eventDir(ev), META_FILE);
   fs.writeFileSync(file + '.tmp', JSON.stringify(meta, null, 2));
@@ -87,7 +87,7 @@ export function writeMeta(ev) {
 }
 
 // ---------- events ----------
-export function createEvent({ date, title, owner }) {
+export function createEvent({ date, title, organiser = '' }) {
   if (!storageOnline()) throw Object.assign(new Error('Storage offline, try again shortly'), { status: 503 });
   title = cleanTitle(title);
   if (!isDate8(date)) throw Object.assign(new Error('Date must be YYYYMMDD'), { status: 400 });
@@ -95,10 +95,9 @@ export function createEvent({ date, title, owner }) {
   let folder = `${date} ${title}`, n = 2;
   while (fs.existsSync(path.join(EVENTS_DIR(), folder))) folder = `${date} ${title} (${n++})`;
   fs.mkdirSync(path.join(EVENTS_DIR(), folder, PUBLIC_UPLOAD), { recursive: true });
-  const ev = db.insertEvent({ id: uuid(), folderName: folder, date, title: folder.slice(9), ownerId: owner.id, token: shortToken() });
-  db.setMember(ev.id, owner.id, 1);
+  const ev = db.insertEvent({ id: uuid(), folderName: folder, date, title: folder.slice(9), token: shortToken(), organiser: cleanTitle(organiser) });
   writeMeta(ev);
-  return db.getEvent(ev.id);
+  return ev;
 }
 
 // Deleting an event deletes the folder for good (no recycle bin, Rafi's choice #50).
@@ -163,7 +162,7 @@ export function scanEventPhotos(ev) {
     db.deletePhotoRow(gone.id);
     publish(ev.id, 'remove', { id: gone.id });
   }
-  for (const p of added) publish(ev.id, 'photo', p);
+  for (const p of added) publishPhoto(p);
   return added;
 }
 
@@ -185,21 +184,18 @@ export function scanAll() {
       if (ev && seen.has(ev.id)) ev = null; // folder copied over SMB with the same .livephoto.json
       if (ev) {
         if (ev.folder_name !== folder || ev.deleted_at) {
-          db.insertEvent({ id: ev.id, folderName: folder, date, title, ownerId: ev.owner_id, token: ev.public_token, createdAt: ev.created_at });
+          db.insertEvent({ id: ev.id, folderName: folder, date, title, token: ev.public_token, createdAt: ev.created_at });
         }
         ev = db.getEvent(ev.id);
       } else {
         // New folder (made over SMB, or the DB was rebuilt): adopt it, using .livephoto.json when present.
-        const owner = (meta?.owner && db.getUserByEmail(meta.owner)) || db.getUserByEmail(config.adminEmail);
         const id = meta?.id && !seen.has(meta.id) ? meta.id : uuid();
-        let token = meta?.token && !db.getEventByToken(meta.token) ? meta.token : shortToken();
-        ev = db.insertEvent({ id, folderName: folder, date, title, ownerId: owner?.id, token,
+        const token = meta?.token && !db.getEventByToken(meta.token) ? meta.token : shortToken();
+        ev = db.insertEvent({ id, folderName: folder, date, title, token, organiser: meta?.organiser || '',
+          publicCode: meta?.codes?.public, photoCode: meta?.codes?.photographer, clientCode: meta?.codes?.client,
           publicUploadOn: meta ? meta.public_upload !== false : true,
           createdAt: meta?.created ? Date.parse(meta.created) || Date.now() : Date.now() });
-        for (const m of meta?.members || []) {
-          const u = db.getUserByEmail(m.email);
-          if (u) try { db.setMember(id, u.id, m.slot); } catch { /* slot clash */ }
-        }
+        for (const p of meta?.photographers || []) { try { db.slotForName(id, String(p.name || `Photographer ${p.slot}`)); } catch { /* ignore */ } }
         try { writeMeta(ev); } catch { /* read-only share: fine */ }
         stats.created++;
       }

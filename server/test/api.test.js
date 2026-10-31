@@ -1,26 +1,51 @@
-// End-to-end API test: login by code, events, slots, chunked upload, guest upload, SSE, scanner.
-// Run: cd server && npm test
+// End-to-end API test (v4): Access admin, event codes, live window, guest + photographer uploads,
+// AI moderation (mock moderator), organiser panel, live status, scanner. Run: cd server && npm test
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import crypto from 'node:crypto';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'livephoto-'));
+
+// --- fake Cloudflare Access (certs) + fake AI moderator ---
+const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+const jwk = { ...publicKey.export({ format: 'jwk' }), kid: 'k1', alg: 'RS256' };
+let modCalls = 0, modVerdict = () => ({ verdict: 'ok', labels: [] });
+const aux = http.createServer(async (req, res) => {
+  if (req.url === '/certs') return res.end(JSON.stringify({ keys: [jwk] }));
+  if (req.url === '/check') {
+    let b = ''; for await (const c of req) b += c;
+    modCalls++;
+    return res.end(JSON.stringify(modVerdict(JSON.parse(b))));
+  }
+  res.statusCode = 404; res.end();
+});
+await new Promise((r) => aux.listen(0, '127.0.0.1', r));
+const auxUrl = `http://127.0.0.1:${aux.address().port}`;
+
 Object.assign(process.env, {
-  DATA_DIR: path.join(tmp, 'data'), PHOTOS_DIR: path.join(tmp, 'photos'), DEV_LOG_CODES: '1',
-  COOKIE_SECURE: '0', ADMIN_EMAIL: 'admin@example.com', PUBLIC_URL: 'http://localhost', SCAN_INTERVAL: '3600',
+  DATA_DIR: path.join(tmp, 'data'), PHOTOS_DIR: path.join(tmp, 'photos'), COOKIE_SECURE: '0', PUBLIC_URL: 'http://localhost',
+  SCAN_INTERVAL: '3600', ACCESS_AUD: 'aud-livephoto', ACCESS_TEAM_DOMAIN: 'johorstudio.cloudflareaccess.com',
+  ACCESS_CERTS_URL: `${auxUrl}/certs`, ADMIN_EMAILS: 'rafierosliputra@gmail.com,johorstudio@gmail.com',
+  MODERATOR_URL: auxUrl, GUEST_UPLOADS_PER_EVENT: '3',
 });
 const { handler } = await import('../src/server.js');
 const db = await import('../src/db.js');
 const storage = await import('../src/storage.js');
 
-let base, server;
-const codes = {};
-const origLog = console.log;
-console.log = (...a) => { const m = /login code for (\S+): (\d{6})/.exec(a.join(' ')); if (m) codes[m[1]] = m[2]; else origLog(...a); };
+function jwt(email, { aud = 'aud-livephoto', exp = Math.floor(Date.now() / 1000) + 3600 } = {}) {
+  const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const head = enc({ alg: 'RS256', kid: 'k1', typ: 'JWT' });
+  const body = enc({ email, aud: [aud], iss: 'https://johorstudio.cloudflareaccess.com', exp });
+  const sig = crypto.sign('RSA-SHA256', Buffer.from(`${head}.${body}`), privateKey).toString('base64url');
+  return `${head}.${body}.${sig}`;
+}
+const ADMIN = { 'cf-access-jwt-assertion': jwt('rafierosliputra@gmail.com') };
 
+let base, server;
 before(async () => {
   db.openDb();
   storage.ensureStorage();
@@ -28,193 +53,188 @@ before(async () => {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
-after(() => { server.closeAllConnections(); server.close(); db.closeDb(); console.log = origLog; fs.rmSync(tmp, { recursive: true, force: true }); });
+after(() => { server.closeAllConnections(); server.close(); aux.close(); db.closeDb(); fs.rmSync(tmp, { recursive: true, force: true }); });
 
-async function call(method, url, { token, body, raw, headers = {} } = {}) {
-  const h = { ...headers };
-  if (token) h.authorization = `Bearer ${token}`;
-  if (body !== undefined) h['content-type'] = 'application/json';
-  const r = await fetch(base + url, { method, headers: h, body: raw ?? (body !== undefined ? JSON.stringify(body) : undefined) });
-  const type = r.headers.get('content-type') || '';
-  return { status: r.status, body: type.includes('json') ? await r.json() : Buffer.from(await r.arrayBuffer()), headers: r.headers };
+// Cookie jar per "device"
+function device(ip) {
+  const jar = {};
+  return async function call(method, url, { body, raw, headers = {} } = {}) {
+    const h = { 'x-forwarded-for': ip, ...headers };
+    const ck = Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
+    if (ck) h.cookie = ck;
+    if (body !== undefined) h['content-type'] = 'application/json';
+    const r = await fetch(base + url, { method, headers: h, body: raw ?? (body !== undefined ? JSON.stringify(body) : undefined) });
+    for (const c of r.headers.getSetCookie()) { const [kv] = c.split(';'); const [k, v] = kv.split('='); if (v) jar[k] = v; else delete jar[k]; }
+    const type = r.headers.get('content-type') || '';
+    return { status: r.status, body: type.includes('json') ? await r.json() : Buffer.from(await r.arrayBuffer()), headers: r.headers };
+  };
 }
-async function login(email) {
-  const req = await call('POST', '/auth/code/request', { body: { email } });
-  assert.equal(req.status, 200);
-  const v = await call('POST', '/auth/code/verify', { body: { email, code: codes[email], app: true } });
-  assert.equal(v.status, 200, JSON.stringify(v.body));
-  return v.body.appToken;
-}
-// Minimal WebP: RIFF + VP8X (size) + EXIF chunk (to check it is stripped for guests).
+const admin = device('10.0.0.1');
+const A = (m, u, o = {}) => admin(m, u, { ...o, headers: { ...ADMIN, ...(o.headers || {}) } });
+
 function fakeWebp(w, h, pad = 0) {
   const vp8x = Buffer.alloc(18); vp8x.write('VP8X', 0); vp8x.writeUInt32LE(10, 4); vp8x[8] = 0x08;
   vp8x.writeUIntLE(w - 1, 12, 3); vp8x.writeUIntLE(h - 1, 15, 3);
-  const exif = Buffer.alloc(8 + 6); exif.write('EXIF', 0); exif.writeUInt32LE(6, 4); exif.write('GPS!!!', 8);
+  const exif = Buffer.alloc(14); exif.write('EXIF', 0); exif.writeUInt32LE(6, 4); exif.write('GPS!!!', 8);
   const data = Buffer.alloc(8 + pad); data.write('VP8L', 0); data.writeUInt32LE(pad, 4);
   const body = Buffer.concat([Buffer.from('WEBP'), vp8x, exif, data]);
   const head = Buffer.alloc(8); head.write('RIFF', 0); head.writeUInt32LE(body.length, 4);
   return Buffer.concat([head, body]);
 }
-
-let adminTok, userTok, eventId, token;
-
-test('unknown email gets the same answer but no code', async () => {
-  const r = await call('POST', '/auth/code/request', { body: { email: 'stranger@example.com' } });
-  assert.equal(r.status, 200);
-  assert.equal(codes['stranger@example.com'], undefined);
-});
-
-test('admin logs in with email code; wrong code rejected', async () => {
-  await call('POST', '/auth/code/request', { body: { email: 'admin@example.com' } });
-  const bad = await call('POST', '/auth/code/verify', { body: { email: 'admin@example.com', code: '000000' } });
-  assert.equal(bad.status, 401);
-  const ok = await call('POST', '/auth/code/verify', { body: { email: 'admin@example.com', code: codes['admin@example.com'], app: true } });
-  assert.equal(ok.status, 200);
-  assert.match(ok.headers.get('set-cookie'), /lp_s=.*HttpOnly/);
-  adminTok = ok.body.appToken;
-  const me = await call('GET', '/api/me', { token: adminTok });
-  assert.equal(me.body.user.role, 'admin');
-});
-
-test('admin adds a user, user creates an event', async () => {
-  const add = await call('POST', '/api/admin/users', { token: adminTok, body: { email: 'Ali@Example.com', name: 'Ali' } });
-  assert.equal(add.status, 201);
-  userTok = await login('ali@example.com');
-  const bad = await call('POST', '/api/events', { token: userTok, body: { date: '2026131', title: 'x' } });
-  assert.equal(bad.status, 400);
-  const ev = await call('POST', '/api/events', { token: userTok, body: { date: '20261031', title: 'Konvo Tadika / Bandar Putra' } });
-  assert.equal(ev.status, 201, JSON.stringify(ev.body));
-  eventId = ev.body.event.id; token = ev.body.event.token;
-  assert.equal(ev.body.event.folder, '20261031 Konvo Tadika Bandar Putra');
-  assert.equal(ev.body.event.mySlot, 1);
-  assert.equal(ev.body.event.publicUpload, true);
-  const dir = path.join(process.env.PHOTOS_DIR, 'EVENTS', '20261031 Konvo Tadika Bandar Putra');
-  assert.ok(fs.existsSync(path.join(dir, '.livephoto.json')));
-  assert.ok(fs.existsSync(path.join(dir, 'public upload')));
-});
-
-test('other users cannot see the event; admin sees all', async () => {
-  await call('POST', '/api/admin/users', { token: adminTok, body: { email: 'abu@example.com' } });
-  const abu = await login('abu@example.com');
-  assert.equal((await call('GET', '/api/events', { token: abu })).body.events.length, 0);
-  assert.equal((await call('GET', `/api/events/${eventId}`, { token: abu })).status, 404);
-  assert.equal((await call('GET', '/api/events', { token: adminTok })).body.events.length, 1);
-  // admin makes Abu Photographer 2
-  const m = await call('POST', `/api/events/${eventId}/members`, { token: adminTok, body: { email: 'abu@example.com', slot: 2 } });
-  assert.equal(m.status, 200);
-  assert.equal((await call('GET', '/api/events', { token: abu })).body.events[0].mySlot, 2);
-});
-
-test('photographer chunked upload with resume and thumbnail; SSE gets it', async () => {
-  const file = fakeWebp(6000, 4000, 9000);
-  const sse = await new Promise((resolve) => {
-    http.get(`${base}/api/e/${token}/stream`, (res) => {
-      let buf = '';
-      res.on('data', (c) => { buf += c; if (buf.includes('event: photo')) { res.destroy(); resolve(buf); } });
-    });
-    setTimeout(async () => {
-      const s = await call('POST', `/api/events/${eventId}/uploads`, { token: userTok, body: { name: 'DSC01234.webp', size: file.length } });
-      assert.equal(s.status, 201, JSON.stringify(s.body));
-      const id = s.body.id;
-      const half = 5000;
-      assert.equal((await call('PUT', `/api/uploads/${id}?offset=0`, { raw: file.subarray(0, half) })).body.received, half);
-      const wrong = await call('PUT', `/api/uploads/${id}?offset=0`, { raw: file.subarray(0, half) });
-      assert.equal(wrong.status, 409); assert.equal(wrong.body.received, half);
-      assert.equal((await call('GET', `/api/uploads/${id}`)).body.received, half);
-      await call('PUT', `/api/uploads/${id}?offset=${half}`, { raw: file.subarray(half) });
-      assert.equal((await call('PUT', `/api/uploads/${id}/thumb/480`, { raw: fakeWebp(480, 320) })).status, 200);
-      const done = await call('POST', `/api/uploads/${id}/complete`);
-      assert.equal(done.status, 200, JSON.stringify(done.body));
-      assert.equal(done.body.photo.w, 6000);
-      assert.equal(done.body.photo.th, 1);
-    }, 100);
-  });
-  assert.match(sse, /"w":6000/);
-  const f = path.join(process.env.PHOTOS_DIR, 'EVENTS', '20261031 Konvo Tadika Bandar Putra', 'Photographer 1', 'DSC01234.webp');
-  assert.equal(fs.statSync(f).size, file.length);
-});
-
-test('guest upload: webp only, EXIF stripped, appears in public gallery', async () => {
-  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]);
-  const s1 = await call('POST', `/api/e/${token}/uploads`, { body: { name: 'a.webp', size: jpeg.length } });
-  assert.equal((await call('PUT', `/api/uploads/${s1.body.id}?offset=0`, { raw: jpeg })).status, 415);
-  const file = fakeWebp(3000, 4000, 100);
-  const s = await call('POST', `/api/e/${token}/uploads`, { body: { name: 'IMG_1.webp', size: file.length } });
+async function upload(call, startUrl, file, startBody = {}) {
+  const s = await call('POST', startUrl, { body: { name: 'IMG_1.webp', size: file.length, ...startBody } });
+  if (s.status !== 201) return s;
   await call('PUT', `/api/uploads/${s.body.id}?offset=0`, { raw: file });
-  const done = await call('POST', `/api/uploads/${s.body.id}/complete`);
-  assert.equal(done.status, 200, JSON.stringify(done.body));
-  assert.equal(done.body.photo.src, 'public');
-  const g = await call('GET', `/api/e/${token}`);
-  assert.equal(g.body.photos.length, 2);
-  assert.equal(g.body.photos[0].src, 'public'); // newest first
-  const img = await call('GET', `/p/${token}/${done.body.photo.id}/orig`);
-  assert.equal(img.status, 200);
-  assert.ok(!img.body.includes(Buffer.from('GPS!!!')));
-  // thumbnail exists for the photographer photo, original used as fallback for the guest one
-  assert.equal((await call('GET', `/p/${token}/${g.body.photos[1].id}/480`)).body.length < 200, true);
+  return call('POST', `/api/uploads/${s.body.id}/complete`);
+}
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+let ev, codes;
+const guest = device('10.0.0.2'), photog = device('10.0.0.3'), client = device('10.0.0.4'), stranger = device('10.0.0.5');
+
+test('admin API needs a valid Cloudflare Access login', async () => {
+  assert.equal((await admin('GET', '/api/admin/me')).status, 401);
+  assert.equal((await admin('GET', '/api/admin/me', { headers: { 'cf-access-jwt-assertion': jwt('someone@gmail.com') } })).status, 403);
+  assert.equal((await admin('GET', '/api/admin/me', { headers: { 'cf-access-jwt-assertion': jwt('rafierosliputra@gmail.com', { aud: 'other' }) } })).status, 401);
+  assert.equal((await admin('GET', '/api/admin/me', { headers: { 'cf-access-jwt-assertion': jwt('rafierosliputra@gmail.com', { exp: 1 }) } })).status, 401);
+  const forged = jwt('johorstudio@gmail.com').replace(/\.[^.]+$/, '.AAAA');
+  assert.equal((await admin('GET', '/api/admin/me', { headers: { 'cf-access-jwt-assertion': forged } })).status, 401);
+  const ok = await A('GET', '/api/admin/me');
+  assert.equal(ok.status, 200); assert.equal(ok.body.email, 'rafierosliputra@gmail.com');
 });
 
-test('hide photo, closed guest upload, new link', async () => {
-  const g = await call('GET', `/api/e/${token}`);
-  const pid = g.body.photos[0].id;
-  assert.equal((await call('PATCH', `/api/photos/${pid}`, { token: userTok, body: { hidden: true } })).status, 200);
-  assert.equal((await call('GET', `/api/e/${token}`)).body.photos.length, 1);
-  assert.equal((await call('GET', `/p/${token}/${pid}/orig`)).status, 404);
-  await call('PATCH', `/api/events/${eventId}`, { token: userTok, body: { publicUpload: false } });
-  assert.equal((await call('POST', `/api/e/${token}/uploads`, { body: { size: 10 } })).status, 403);
-  const nl = await call('PATCH', `/api/events/${eventId}`, { token: userTok, body: { newLink: true } });
-  assert.notEqual(nl.body.event.token, token);
-  assert.equal((await call('GET', `/api/e/${token}`)).status, 404);
-  token = nl.body.event.token;
-  // only admin may pick the landing-page sample
-  assert.equal((await call('PATCH', `/api/events/${eventId}`, { token: userTok, body: { showcase: true } })).status, 403);
-  assert.equal((await call('PATCH', `/api/events/${eventId}`, { token: adminTok, body: { showcase: true } })).status, 200);
-  assert.equal((await call('GET', '/api/showcase')).body.photos.length, 1);
+test('admin creates an event with three different codes; not live yet', async () => {
+  const r = await A('POST', '/api/admin/events', { body: { date: '20261101', title: 'Annual Dinner ABC', organiser: 'ABC Sdn Bhd' } });
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  ev = r.body.event; codes = ev.codes;
+  assert.equal(ev.status, 'draft');
+  assert.equal(new Set(Object.values(codes)).size, 3);
+  assert.ok(Object.values(codes).every((c) => /^\d{6}$/.test(c)));
+  const g = await guest('POST', '/auth/code', { body: { code: codes.public } });
+  assert.equal(g.status, 403); // not live
+  assert.equal((await stranger('GET', '/api/live-status')).body.count, 0);
 });
 
-test('scanner: files and folders changed over SMB', async () => {
-  const evDir = path.join(process.env.PHOTOS_DIR, 'EVENTS', '20261031 Konvo Tadika Bandar Putra');
-  const f = path.join(evDir, 'Photographer 3', 'smb.webp');
-  fs.mkdirSync(path.dirname(f), { recursive: true });
-  fs.writeFileSync(f, fakeWebp(800, 1200));
-  const old = new Date(Date.now() - 60e3); fs.utimesSync(f, old, old);
+test('activate: new codes, live status, wrong-code limit with tries left', async () => {
+  const r = await A('POST', `/api/admin/events/${ev.id}/activate`, { body: {} });
+  assert.equal(r.body.event.status, 'live');
+  assert.notEqual(r.body.event.codes.public, codes.public);
+  codes = r.body.event.codes;
+  assert.ok(r.body.event.endsAt - r.body.event.startsAt === 8 * 3600e3);
+  const ls = await stranger('GET', '/api/live-status', { headers: { origin: 'https://johorstudio.com' } });
+  assert.equal(ls.body.count, 1); assert.equal(ls.body.live[0].name, 'Annual Dinner ABC');
+  assert.equal(ls.headers.get('access-control-allow-origin'), 'https://johorstudio.com');
+  await A('PATCH', `/api/admin/events/${ev.id}`, { body: { hideName: true } });
+  assert.equal((await stranger('GET', '/api/live-status')).body.live[0].name, 'Event in progress');
+  const bad = String((Number(codes.public) + 1) % 1e6).padStart(6, '0');
+  const w1 = await stranger('POST', '/auth/code', { body: { code: bad === codes.photographer || bad === codes.client ? '000001' : bad } });
+  assert.equal(w1.status, 401); assert.equal(w1.body.triesLeft, 2); assert.match(w1.body.error, /2 tries left/);
+  await stranger('POST', '/auth/code', { body: { code: '999999' } });
+  const w3 = await stranger('POST', '/auth/code', { body: { code: '999998' } });
+  assert.equal(w3.status, 429);
+  assert.equal((await stranger('POST', '/auth/code', { body: { code: codes.public } })).status, 429); // locked even with the right code
+});
+
+test('guest: code -> gallery, must accept notice, upload goes to AI, limit 3', async () => {
+  const pc = await guest('POST', '/auth/code', { body: { code: codes.photographer, want: 'guest' } });
+  assert.equal(pc.status, 400); assert.match(pc.body.error, /photographer code/);
+  const r = await guest('POST', '/auth/code', { body: { code: codes.public, want: 'guest' } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.next, `/e/${ev.token}`);
+  const g = await guest('GET', `/api/e/${ev.token}`);
+  assert.equal(g.body.guest.canUpload, true); assert.equal(g.body.guest.agreed, false);
+  assert.equal((await upload(guest, `/api/e/${ev.token}/uploads`, fakeWebp(3000, 4000))).status, 428);
+  await guest('POST', `/api/e/${ev.token}/agree`);
+  modVerdict = () => ({ verdict: 'ok', labels: [] });
+  const up = await upload(guest, `/api/e/${ev.token}/uploads`, fakeWebp(3000, 4000), { uploader: 'Siti' });
+  assert.equal(up.status, 200, JSON.stringify(up.body));
+  assert.equal(up.body.photo.status, 'pending');
+  await wait(200);
+  const after1 = await guest('GET', `/api/e/${ev.token}`);
+  assert.equal(after1.body.photos.length, 1); assert.equal(after1.body.photos[0].by, 'Siti');
+  // flagged by the AI: not public, waits for review
+  modVerdict = () => ({ verdict: 'flag', labels: ['document'] });
+  await upload(guest, `/api/e/${ev.token}/uploads`, fakeWebp(1000, 1400));
+  await wait(200);
+  // blocked (NSFW)
+  modVerdict = () => ({ verdict: 'block', labels: ['nsfw'] });
+  await upload(guest, `/api/e/${ev.token}/uploads`, fakeWebp(1000, 1400));
+  await wait(200);
+  assert.equal((await guest('GET', `/api/e/${ev.token}`)).body.photos.length, 1);
+  const lim = await upload(guest, `/api/e/${ev.token}/uploads`, fakeWebp(1000, 1000));
+  assert.equal(lim.status, 429); assert.match(lim.body.error, /limit of 3/);
+  assert.equal(modCalls, 3);
+});
+
+test('photographer: code + name -> Photographer N, upload is approved without AI', async () => {
+  assert.equal((await photog('POST', '/auth/code', { body: { code: codes.photographer } })).status, 400); // name needed
+  const r = await photog('POST', '/auth/code', { body: { code: codes.photographer, name: 'Aiman', app: true } });
+  assert.equal(r.status, 200); assert.equal(r.body.slot, 1); assert.ok(r.body.token);
+  const second = device('10.0.0.9');
+  assert.equal((await second('POST', '/auth/code', { body: { code: codes.photographer, name: 'Rafi' } })).body.slot, 2);
+  assert.equal((await second('POST', '/auth/code', { body: { code: codes.photographer, name: 'aiman' } })).body.slot, 1); // same name, same slot
+  // the app uses the bearer token
+  const bearer = device('10.0.0.10');
+  const me = await bearer('GET', '/api/shoot', { headers: { authorization: `Bearer ${r.body.token}` } });
+  assert.equal(me.body.slot, 1); assert.equal(me.body.folder, 'Photographer 1');
+  const before = modCalls;
+  const up = await upload(photog, '/api/shoot/uploads', fakeWebp(6000, 4000, 5000), { name: 'DSC01234.webp' });
+  assert.equal(up.status, 200); assert.equal(up.body.photo.status, 'approved'); assert.equal(up.body.photo.by, 'Aiman');
+  assert.equal(modCalls, before);
+  assert.ok(fs.existsSync(path.join(process.env.PHOTOS_DIR, 'EVENTS', ev.folder, 'Photographer 1', 'DSC01234.webp')));
+  // admin moves Aiman to slot 3; his session follows
+  await A('POST', `/api/admin/events/${ev.id}/slots`, { body: { from: 1, to: 3 } });
+  assert.equal((await photog('GET', '/api/shoot')).body.slot, 3);
+});
+
+test('organiser panel: review queue, allow / remove, request to close', async () => {
+  assert.equal((await client('GET', `/api/client/events/${ev.id}`)).status, 401);
+  const r = await client('POST', '/auth/code', { body: { code: codes.client } });
+  assert.equal(r.status, 200); assert.equal(r.body.next, '/panel');
+  const review = await client('GET', `/api/client/events/${ev.id}/photos?filter=review`);
+  assert.equal(review.body.photos.length, 1); assert.deepEqual(review.body.photos[0].flags, ['document']);
+  const blocked = await client('GET', `/api/client/events/${ev.id}/photos?filter=blocked`);
+  assert.equal(blocked.body.photos.length, 1);
+  await client('PATCH', `/api/client/events/${ev.id}/photos/${review.body.photos[0].id}`, { body: { status: 'approved' } });
+  assert.equal((await guest('GET', `/api/e/${ev.token}`)).body.photos.length, 3);
+  assert.equal((await client('DELETE', `/api/client/events/${ev.id}/photos/${blocked.body.photos[0].id}`)).status, 200);
+  // organiser cannot use admin routes or change settings
+  assert.equal((await client('POST', `/api/admin/events/${ev.id}/close`)).status, 401);
+  const rq = await client('POST', `/api/client/events/${ev.id}/request`, { body: { type: 'close' } });
+  assert.equal(rq.body.event.request.type, 'close');
+  assert.equal((await A('GET', `/api/admin/events/${ev.id}`)).body.event.request.type, 'close');
+});
+
+test('settings, extend, close: guests and photographers logged out, guest code changes, gallery stays', async () => {
+  const s = await A('PATCH', `/api/admin/events/${ev.id}`, { body: { settings: { newSec: 4, loopSec: 6, loopSource: 'public', idleMin: 2 } } });
+  assert.deepEqual(s.body.event.settings, { newSec: 4, loopSec: 6, loopSource: 'public', idleMin: 2 });
+  const manual = await A('PATCH', `/api/admin/events/${ev.id}`, { body: { codes: { public: codes.client } } });
+  assert.equal(manual.status, 409);
+  const before = (await A('GET', `/api/admin/events/${ev.id}`)).body.event;
+  const ex = await A('POST', `/api/admin/events/${ev.id}/extend`, { body: { hours: 2 } });
+  assert.equal(ex.body.event.endsAt, before.endsAt + 2 * 3600e3);
+  const c = await A('POST', `/api/admin/events/${ev.id}/close`);
+  assert.equal(c.body.event.status, 'closed'); assert.equal(c.body.event.request, null);
+  assert.notEqual(c.body.event.codes.public, codes.public);
+  assert.equal((await photog('GET', '/api/shoot')).status, 401);
+  const g = await guest('GET', `/api/e/${ev.token}`);
+  assert.equal(g.status, 200); assert.equal(g.body.guest.canUpload, false); assert.equal(g.body.photos.length, 3);
+  assert.equal((await client('GET', `/api/client/events/${ev.id}`)).status, 200); // organiser keeps access 7 days
+  assert.equal((await stranger('GET', '/api/live-status')).body.count, 0);
+});
+
+test('scanner adopts SMB folders with their codes', async () => {
+  const meta = JSON.parse(fs.readFileSync(path.join(process.env.PHOTOS_DIR, 'EVENTS', ev.folder, '.livephoto.json'), 'utf8'));
+  assert.equal(meta.photographers.length, 2);
+  fs.mkdirSync(path.join(process.env.PHOTOS_DIR, 'EVENTS', '20261225 Hari Keluarga'));
   storage.scanAll();
-  const list = (await call('GET', `/api/events/${eventId}/photos`, { token: adminTok })).body.photos;
-  const smb = list.find((p) => p.name === 'smb.webp');
-  assert.equal(smb.slot, 3); assert.equal(smb.h, 1200);
-  assert.equal((await call('GET', `/api/events/${eventId}/missing-thumbs`, { token: adminTok })).body.photos.length >= 1, true);
-  // rename the folder over SMB: same event id, same owner, link still works
-  const renamed = path.join(process.env.PHOTOS_DIR, 'EVENTS', '20261101 Konvo Renamed');
-  fs.renameSync(evDir, renamed);
-  storage.scanAll();
-  const ev = (await call('GET', `/api/events/${eventId}`, { token: userTok })).body.event;
-  assert.equal(ev.folder, '20261101 Konvo Renamed');
-  assert.equal((await call('GET', `/api/e/${token}`)).status, 200);
-  // a brand-new folder made over SMB is adopted, owned by the admin
-  fs.mkdirSync(path.join(process.env.PHOTOS_DIR, 'EVENTS', '20261225 Annual Dinner'));
-  storage.scanAll();
-  assert.equal((await call('GET', '/api/events', { token: adminTok })).body.events.length, 2);
-});
-
-test('removed user loses access; re-adding restores their events', async () => {
-  const users = (await call('GET', '/api/admin/users', { token: adminTok })).body.users;
-  const ali = users.find((u) => u.email === 'ali@example.com');
-  await call('PATCH', `/api/admin/users/${ali.id}`, { token: adminTok, body: { status: 'removed' } });
-  assert.equal((await call('GET', '/api/events', { token: userTok })).status, 401);
-  await call('POST', '/api/admin/users', { token: adminTok, body: { email: 'ali@example.com' } });
-  const t = await login('ali@example.com');
-  assert.equal((await call('GET', '/api/events', { token: t })).body.events.length, 1);
-  userTok = t;
-});
-
-test('delete event needs the exact name and removes the folder', async () => {
-  const ev = (await call('GET', `/api/events/${eventId}`, { token: userTok })).body.event;
-  assert.equal((await call('DELETE', `/api/events/${eventId}`, { token: userTok, body: { confirm: 'nope' } })).status, 400);
-  assert.equal((await call('DELETE', `/api/events/${eventId}`, { token: userTok, body: { confirm: ev.folder } })).status, 200);
-  assert.ok(!fs.existsSync(path.join(process.env.PHOTOS_DIR, 'EVENTS', ev.folder)));
-  assert.equal((await call('GET', `/api/e/${token}`)).status, 404);
+  const list = (await A('GET', '/api/admin/events')).body.events;
+  assert.equal(list.length, 2);
+  assert.ok(list.every((e) => e.codes.public && e.codes.client));
 });
 
 test('pages are served', async () => {
-  for (const p of ['/', '/login', '/admin', '/e/abcdefgh23']) assert.equal((await call('GET', p)).status, 200, p);
+  for (const p of ['/', '/c/123456', '/admin', '/panel', '/shoot', `/show/${ev.id}`, `/e/${ev.token}`]) {
+    assert.equal((await stranger('GET', p)).status, 200, p);
+  }
 });

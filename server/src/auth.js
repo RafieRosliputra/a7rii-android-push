@@ -1,130 +1,143 @@
-// Login: Google ID token or a 6-digit email code (sent by JohorStudio Mail).
-// Only emails the admin has added (allowlist, status active) may log in. Sessions last 30 days:
-// HttpOnly cookie for the web, bearer token for the Android app.
+// Who is calling:
+//  - Admin: Cloudflare Access in front of /admin and /api/admin. We verify the Access JWT
+//    (RS256, team certs, audience tag) and check the email against ADMIN_EMAILS.
+//  - Guest / photographer / organiser (client): the 6-digit code for one event. A guest or
+//    photographer session works while the event is live (8 h window, or until the admin closes it);
+//    an organiser session works until 7 days after the event ends.
 import crypto from 'node:crypto';
 import { config } from './config.js';
 import * as db from './db.js';
-import { HttpError, cookie, parseCookies, randomToken, sha256, rateLimiter } from './http.js';
+import { HttpError, cookie, parseCookies, randomToken, sha256 } from './http.js';
 
-export const COOKIE = 'lp_s';
-const codeIpLimit = rateLimiter(20, 15 * 60e3);
-const codeEmailLimit = rateLimiter(5, 15 * 60e3);
-const verifyIpLimit = rateLimiter(40, 15 * 60e3);
+export const COOKIES = { guest: 'lp_g', photographer: 'lp_p', client: 'lp_c' };
 
-// ---------- sessions ----------
-export function startSession(user, kind, label = '') {
+// ---------------- Cloudflare Access ----------------
+let certs = { at: 0, keys: new Map() };
+async function accessKeys(force = false) {
+  if (!force && Date.now() - certs.at < 3600e3 && certs.keys.size) return certs.keys;
+  const url = config.accessCertsUrl || `https://${config.accessTeam}/cdn-cgi/access/certs`;
+  const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error(`certs ${r.status}`);
+  const j = await r.json();
+  const keys = new Map();
+  for (const k of j.keys || []) keys.set(k.kid, crypto.createPublicKey({ key: k, format: 'jwk' }));
+  certs = { at: Date.now(), keys };
+  return keys;
+}
+const b64json = (s) => JSON.parse(Buffer.from(s, 'base64url').toString('utf8'));
+
+export async function verifyAccessJwt(token) {
+  const parts = String(token || '').split('.');
+  if (parts.length !== 3) throw new HttpError(401, 'Admin login required');
+  let head, claims;
+  try { head = b64json(parts[0]); claims = b64json(parts[1]); } catch { throw new HttpError(401, 'Admin login required'); }
+  if (head.alg !== 'RS256') throw new HttpError(401, 'Admin login required');
+  let keys = await accessKeys().catch(() => new Map());
+  if (!keys.has(head.kid)) keys = await accessKeys(true).catch(() => new Map());
+  const key = keys.get(head.kid);
+  if (!key) throw new HttpError(401, 'Admin login could not be verified');
+  const ok = crypto.verify('RSA-SHA256', Buffer.from(`${parts[0]}.${parts[1]}`), key, Buffer.from(parts[2], 'base64url'));
+  if (!ok) throw new HttpError(401, 'Admin login could not be verified');
+  const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+  if (!config.accessAud || !aud.includes(config.accessAud)) throw new HttpError(401, 'Admin login is for another application');
+  if (claims.iss !== `https://${config.accessTeam}`) throw new HttpError(401, 'Admin login issuer mismatch');
+  if (!claims.exp || claims.exp * 1000 < Date.now()) throw new HttpError(401, 'Admin login expired, reload the page');
+  const email = String(claims.email || '').toLowerCase();
+  if (!config.adminEmails.includes(email)) throw new HttpError(403, 'This account is not an admin');
+  return { email };
+}
+
+export async function requireAdmin(req) {
+  if (config.devAdmin) return { email: config.devAdmin };
+  const token = req.headers['cf-access-jwt-assertion'] || parseCookies(req).CF_Authorization;
+  return verifyAccessJwt(token);
+}
+
+// ---------------- 6-digit codes ----------------
+// 3 wrong tries per device/IP, then locked for 30 minutes. The reply says how many tries are left.
+const tries = new Map(); // ip -> {n, until}
+setInterval(() => { const t = Date.now(); for (const [k, v] of tries) if (v.until && v.until < t) tries.delete(k); }, 60e3).unref();
+
+function lockInfo(ip) {
+  const v = tries.get(ip);
+  if (v?.until && v.until > Date.now()) return Math.ceil((v.until - Date.now()) / 60e3);
+  return 0;
+}
+function wrongCode(ip) {
+  const v = tries.get(ip) || { n: 0, until: 0 };
+  v.n++;
+  if (v.n >= config.codeTries) { v.until = Date.now() + config.codeLockMin * 60e3; v.n = 0; }
+  tries.set(ip, v);
+  const left = v.until > Date.now() ? 0 : config.codeTries - v.n;
+  const msg = left ? `Wrong code. ${left} ${left === 1 ? 'try' : 'tries'} left.` : `Too many wrong codes. Try again in ${config.codeLockMin} minutes.`;
+  return new HttpError(left ? 401 : 429, msg, { triesLeft: left });
+}
+
+export function cleanName(s, max = 30) {
+  return String(s || '').normalize('NFC').replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+/** Exchange a code for a session. `want` limits which role the form accepts ('guest' | 'photographer' | 'client' | undefined). */
+export function loginWithCode({ code, name, want, ip }) {
+  const mins = lockInfo(ip);
+  if (mins) throw new HttpError(429, `Too many wrong codes. Try again in ${mins} minute${mins === 1 ? '' : 's'}.`, { triesLeft: 0 });
+  code = String(code || '').replace(/\D/g, '');
+  if (code.length !== 6) throw new HttpError(400, 'Enter the 6-digit code');
+  const ev = db.eventByCode(code);
+  if (!ev) throw wrongCode(ip);
+  const role = ev.code_role;
+  if (want && want !== role) {
+    if (want === 'guest' && role === 'photographer') throw new HttpError(400, 'This is a photographer code. Tap "Sign in as photographer".');
+    if (want === 'photographer' && role === 'guest') throw new HttpError(400, 'This is the guest code. Ask the organiser for the photographer code.');
+    throw wrongCode(ip);
+  }
+  if (role === 'client') {
+    if (!db.clientWindowOpen(ev)) throw new HttpError(403, 'This organiser code has expired.');
+  } else if (!db.isLive(ev)) {
+    const st = db.status(ev);
+    throw new HttpError(403, st === 'scheduled' ? `This event opens at ${new Date(ev.starts_at).toLocaleTimeString('en-MY', { timeZone: 'Asia/Kuala_Lumpur', hour: 'numeric', minute: '2-digit' })}.` : 'This event is not live right now.');
+  }
+  tries.delete(ip);
+  let slot = null;
+  if (role === 'photographer') {
+    name = cleanName(name);
+    if (!name) throw new HttpError(400, 'Type your name');
+    slot = db.slotForName(ev.id, name);
+  }
   const token = randomToken();
-  db.createSession({ userId: user.id, tokenHash: sha256(token), kind, label });
-  return token;
+  const s = db.createSession({ tokenHash: sha256(token), role, eventId: ev.id, name: role === 'photographer' ? name : '', slot });
+  return { token, role, session: s, event: db.getEvent(ev.id) };
 }
-export const sessionCookie = (token) => cookie(COOKIE, token, { maxAge: config.sessionDays * 86400, secure: config.cookieSecure });
-export const clearCookie = () => cookie(COOKIE, '', { maxAge: 0, secure: config.cookieSecure });
 
-function tokenOf(req) {
+export const sessionCookie = (role, token, ev) => {
+  const end = role === 'client' ? (ev.closed_at || ev.ends_at || Date.now()) + 7 * 86400e3 : ev.ends_at;
+  return cookie(COOKIES[role], token, { maxAge: Math.max(60, (end - Date.now()) / 1000), secure: config.cookieSecure });
+};
+export const clearCookie = (role) => cookie(COOKIES[role], '', { maxAge: 0, secure: config.cookieSecure });
+
+// A valid session of `role` (optionally for one event). Bearer tokens (the app) count for any role.
+export function sessionFor(req, role, eventId) {
   const h = String(req.headers.authorization || '');
-  if (h.startsWith('Bearer ')) return h.slice(7).trim();
-  return parseCookies(req)[COOKIE] || null;
-}
-export function currentUser(req) {
-  const t = tokenOf(req);
-  return t ? db.sessionUser(sha256(t)) || null : null;
-}
-export function requireUser(req) {
-  const u = currentUser(req);
-  if (!u) throw new HttpError(401, 'Please log in');
-  return u;
-}
-export function requireAdmin(req) {
-  const u = requireUser(req);
-  if (u.role !== 'admin') throw new HttpError(403, 'Admins only');
-  return u;
-}
-export function logout(req) {
-  const t = tokenOf(req);
-  if (t) db.deleteSession(sha256(t));
-}
-
-function allowed(email) {
-  const u = db.getUserByEmail(email);
-  if (!u || u.status !== 'active') throw new HttpError(403, 'This email is not registered for JohorStudio.com Live. Ask the admin to add you.');
-  return u;
-}
-
-// ---------- Google ----------
-// Verify with Google's tokeninfo endpoint (checks signature + expiry), then check audience.
-export async function verifyGoogle(credential, fetchImpl = fetch) {
-  if (!config.googleClientId) throw new HttpError(503, 'Google login is not set up yet. Use the email code.');
-  if (!credential || typeof credential !== 'string') throw new HttpError(400, 'Missing Google credential');
-  let info;
-  try {
-    const r = await fetchImpl(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
-    if (!r.ok) throw new Error(`tokeninfo ${r.status}`);
-    info = await r.json();
-  } catch (e) {
-    throw new HttpError(401, 'Google sign-in could not be verified');
+  const tokens = [];
+  if (h.startsWith('Bearer ')) tokens.push(h.slice(7).trim());
+  const c = parseCookies(req)[COOKIES[role]];
+  if (c) tokens.push(c);
+  for (const t of tokens) {
+    const s = db.sessionByHash(sha256(t));
+    if (!s || s.role !== role || (eventId && s.event_id !== eventId)) continue;
+    const ev = db.getEvent(s.event_id);
+    if (!ev) continue;
+    if (role === 'client' ? !db.clientWindowOpen(ev) : !db.isLive(ev)) continue;
+    return { session: s, event: ev, token: t };
   }
-  if (info.aud !== config.googleClientId) throw new HttpError(401, 'Google sign-in is for another app');
-  if (!['accounts.google.com', 'https://accounts.google.com'].includes(info.iss)) throw new HttpError(401, 'Invalid Google issuer');
-  if (String(info.email_verified) !== 'true') throw new HttpError(401, 'Google email is not verified');
-  const user = allowed(info.email);
-  db.noteLogin(user.id, { name: info.name || null, googleSub: info.sub });
-  return db.getUser(user.id);
+  return null;
 }
-
-// ---------- 6-digit email code ----------
-const codeHash = (email, code) => sha256(`${db.normEmail(email)}:${code}`);
-
-export async function requestCode(email, ip, sendImpl = sendLoginCode) {
-  email = db.normEmail(email);
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, 'Enter a valid email');
-  if (!codeIpLimit(ip) || !codeEmailLimit(email)) throw new HttpError(429, 'Too many codes requested. Wait a few minutes.');
-  const user = db.getUserByEmail(email);
-  // Same answer whether or not the email is registered, so the list of users can't be probed.
-  if (!user || user.status !== 'active') return { sent: true };
-  const prev = db.getCode(email);
-  if (prev && Date.now() - prev.sent_at < 30e3) throw new HttpError(429, 'A code was just sent. Wait 30 seconds before asking again.');
-  const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
-  db.putCode(email, codeHash(email, code));
-  await sendImpl(user, code);
-  return { sent: true };
+export function requireSession(req, role, eventId) {
+  const s = sessionFor(req, role, eventId);
+  if (!s) throw new HttpError(401, role === 'client' ? 'Organiser login required' : 'This event is not live, or your code has expired. Enter the code again.');
+  return s;
 }
-
-export function verifyCode(email, code, ip) {
-  email = db.normEmail(email);
-  if (!verifyIpLimit(ip)) throw new HttpError(429, 'Too many attempts. Wait a few minutes.');
-  const row = db.getCode(email);
-  const bad = new HttpError(401, 'Wrong or expired code');
-  if (!row || row.expires_at < Date.now()) throw bad;
-  if (row.attempts >= 5) { db.deleteCode(email); throw new HttpError(401, 'Too many wrong tries. Ask for a new code.'); }
-  const ok = crypto.timingSafeEqual(Buffer.from(row.code_hash), Buffer.from(codeHash(email, String(code || '').replace(/\D/g, ''))));
-  if (!ok) { db.bumpCodeAttempts(email); throw bad; }
-  db.deleteCode(email);
-  const user = allowed(email);
-  db.noteLogin(user.id);
-  return db.getUser(user.id);
-}
-
-// JohorStudio Mail API (repo johorstudio-mail): template login_code {code, minutes, name}
-export async function sendLoginCode(user, code) {
-  if (config.devLogCodes) { console.log(`[dev] login code for ${user.email}: ${code}`); return; }
-  if (!config.mailKey) throw new HttpError(503, 'Email is not set up yet (MAIL_API_KEY)');
-  let r;
-  try {
-    r = await fetch(`${config.mailApi}/api/v1/send`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${config.mailKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        to: user.email, template: 'login_code', from: config.mailFrom, from_name: config.mailFromName,
-        data: { code, minutes: config.codeMinutes, name: user.name || user.email.split('@')[0] },
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-  } catch (e) {
-    console.error('[mail]', e.message);
-    throw new HttpError(502, 'Could not send the email right now. Try again.');
-  }
-  if (!r.ok) {
-    console.error('[mail]', r.status, await r.text().catch(() => ''));
-    throw new HttpError(502, 'Could not send the email right now. Try again.');
-  }
+export function logout(req, role) {
+  const s = sessionFor(req, role);
+  if (s) db.revokeSession(sha256(s.token));
 }
