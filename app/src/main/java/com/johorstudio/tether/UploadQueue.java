@@ -171,7 +171,8 @@ public class UploadQueue extends Thread {
                 if (e.retryable()) {
                     j.attempts++;
                     save();
-                    listener.onServer(e.status == 0 ? "tiada rangkaian, cuba semula…" : e.status == 503 ? "storan server offline, cuba semula…" : "ralat " + e.status + ", cuba semula…", false);
+                    listener.onServer(e.status == 0 ? "tiada rangkaian, cuba semula…" : e.status == 503 ? "storan server offline, cuba semula…"
+                            : e.status == 401 ? "kod tamat / event ditutup: masukkan kod baru" : "ralat " + e.status + ", cuba semula…", false);
                     listener.onLog("Upload " + j.name + ": " + e.getMessage() + " (cuba semula " + (backoff / 1000) + " s)");
                     sleepWait(backoff);
                     backoff = Math.min(backoff * 2, 60000);

@@ -95,26 +95,46 @@ public class MainActivity extends Activity implements TetherService.Listener {
     }
 
     @Override public void onBackPressed() {
-        if ("live".equals(screen)) showEvents();
-        else moveTaskToBack(true); // keep the service running
+        moveTaskToBack(true); // keep the service running
     }
 
     private void handleIntent(Intent intent) {
         Uri data = intent == null ? null : intent.getData();
         if (data != null && "jstether".equals(data.getScheme()) && "auth".equals(data.getHost())) {
+            // "Return to app" on live.johorstudio.com/shoot?app=1 hands over the photographer session.
             String token = data.getQueryParameter("token");
             if (token != null && !token.isEmpty()) {
                 prefs.edit().putString("token", token).apply();
-                TetherService s = TetherService.get();
-                if (s != null) s.apiChanged();
-                toast("Log masuk berjaya");
+                refreshShoot(true);
+                return;
             }
         }
         UsbDevice d = intent == null ? null : (UsbDevice) intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
-        if (App.token(this) == null) { showLogin(); return; }
-        if (d != null) { askUsb(d); showLive(); return; }
-        if (screen.isEmpty()) { if (prefs.getString("event_id", "").isEmpty()) showEvents(); else showLive(); }
-        else if ("login".equals(screen)) showEvents();
+        if (App.token(this) == null) { showLogin(null); return; }
+        if (d != null) askUsb(d);
+        if (!"live".equals(screen)) { showLive(); refreshShoot(false); }
+    }
+
+    /** Ask the server which event / Photographer N this session belongs to. 401 = code expired. */
+    private void refreshShoot(final boolean announce) {
+        final LiveApi api = App.api(this);
+        if (api == null) { showLogin(null); return; }
+        bg(new Bg() { @Override public Object run() throws Exception { return api.shoot(); } }, new Done() { @Override public void ok(Object r) {
+            saveShoot((JSONObject) r);
+            TetherService s = TetherService.get();
+            if (s != null) s.apiChanged();
+            if (announce) toast("Log masuk berjaya");
+            showLive();
+        }});
+    }
+
+    private void saveShoot(JSONObject r) {
+        JSONObject ev = r.optJSONObject("event");
+        if (ev == null) ev = new JSONObject();
+        prefs.edit().putString("event_id", r.has("eventId") ? r.optString("eventId") : ev.optString("id"))
+                .putString("event_title", ev.optString("title")).putString("event_folder", ev.optString("title"))
+                .putString("event_url", ev.optString("url")).putLong("ends_at", ev.optLong("endsAt"))
+                .putInt("slot", r.optInt("slot")).putString("photog_name", r.optString("name")).apply();
     }
 
     // ------------------------------------------------------------------ small UI kit
@@ -200,7 +220,7 @@ public class MainActivity extends Activity implements TetherService.Listener {
                 runOnUiThread(new Runnable() { @Override public void run() { done.ok(r); } });
             } catch (final LiveApi.ApiException e) {
                 runOnUiThread(new Runnable() { @Override public void run() {
-                    if (e.status == 401) { prefs.edit().remove("token").apply(); toast("Sila log masuk semula"); showLogin(); }
+                    if (e.status == 401) { prefs.edit().remove("token").apply(); showLogin("Kod tamat atau event ditutup. Masukkan kod photographer baru."); }
                     else toast(e.getMessage());
                 }});
             } catch (final Exception e) {
@@ -209,23 +229,61 @@ public class MainActivity extends Activity implements TetherService.Listener {
         }}).start();
     }
 
-    // ------------------------------------------------------------------ login
+    // ------------------------------------------------------------------ login (photographer code)
 
-    private void showLogin() {
+    private void showLogin(String message) {
         screen = "login";
-        LinearLayout root = page("Log masuk", "App jurugambar untuk live.johorstudio.com");
-        space(root, 16);
-        root.addView(text("Log masuk dengan akaun Google atau kod 6 digit yang dihantar ke email. Hanya email yang admin tambah boleh masuk. Log masuk kekal 30 hari.", 15, Color.WHITE, false));
+        LinearLayout root = page("Log masuk jurugambar", "Masukkan kod photographer 6 digit dari admin, dan nama awak.");
         space(root, 12);
-        root.addView(button("Log masuk", true, new View.OnClickListener() { @Override public void onClick(View v) {
-            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(App.serverUrl(MainActivity.this) + "/login?app=1")));
+        if (message != null) root.addView(text(message, 14, AMBER, true));
+        root.addView(text("Kod photographer", 13, MUTED, false));
+        final EditText code = new EditText(this);
+        code.setInputType(InputType.TYPE_CLASS_NUMBER);
+        code.setTextSize(30);
+        code.setLetterSpacing(0.3f);
+        code.setTextColor(Color.WHITE);
+        code.setHint("123456");
+        code.setFilters(new android.text.InputFilter[]{ new android.text.InputFilter.LengthFilter(6) });
+        root.addView(code);
+        root.addView(text("Nama (cth Aiman)", 13, MUTED, false));
+        final EditText name = new EditText(this);
+        name.setSingleLine(true);
+        name.setTextColor(Color.WHITE);
+        name.setText(prefs.getString("photog_name", ""));
+        root.addView(name);
+        space(root, 12);
+        final TextView err = text("", 14, RED, false);
+        root.addView(button("Masuk", true, new View.OnClickListener() { @Override public void onClick(View v) {
+            final String c = code.getText().toString().trim(), n = name.getText().toString().trim();
+            if (c.length() != 6) { err.setText("Masukkan 6 digit kod."); return; }
+            if (n.isEmpty()) { err.setText("Taip nama awak."); return; }
+            final LiveApi api = new LiveApi(App.serverUrl(MainActivity.this), App.fastUrl(MainActivity.this), null);
+            err.setText("Menyemak…");
+            new Thread(new Runnable() { @Override public void run() {
+                try {
+                    final JSONObject r = api.loginCode(c, n);
+                    runOnUiThread(new Runnable() { @Override public void run() {
+                        prefs.edit().putString("token", r.optString("token")).putString("photog_name", n).apply();
+                        saveShoot(r);
+                        TetherService s = TetherService.get();
+                        if (s != null) s.apiChanged();
+                        toast("Masuk sebagai Photographer " + r.optInt("slot"));
+                        showLive();
+                        if (TetherService.get() == null) findCamera();
+                    }});
+                } catch (final Exception e) {
+                    runOnUiThread(new Runnable() { @Override public void run() { err.setText(e.getMessage()); } });
+                }
+            }}).start();
         }}), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
+        root.addView(err);
+        root.addView(text("Mana nak dapat kod? Dari admin JohorStudio.com atau penganjur. Kod photographer berbeza dengan kod tetamu di skrin.", 13, MUTED, false));
         space(root, 8);
         root.addView(button("Tetapan server", false, new View.OnClickListener() { @Override public void onClick(View v) { serverSettings(); } }),
-                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
-        space(root, 12);
+                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
         root.addView(text("Server: " + App.serverUrl(this), 12, MUTED, false));
         setContentView(root);
+        code.requestFocus();
     }
 
     private void serverSettings() {
@@ -249,134 +307,37 @@ public class MainActivity extends Activity implements TetherService.Listener {
                             .putString("fast_url", eFast.getText().toString().trim()).apply();
                     TetherService s = TetherService.get();
                     if (s != null) s.apiChanged();
-                    if ("login".equals(screen)) showLogin();
-                }})
-                .setNegativeButton("Batal", null).show();
-    }
-
-    // ------------------------------------------------------------------ events
-
-    private void showEvents() {
-        screen = "events";
-        final LinearLayout root = page("EVENTS", null);
-        final TextView who = text("…", 13, MUTED, false);
-        root.addView(who);
-        root.addView(row(
-                button("+ EVENT baru", true, new View.OnClickListener() { @Override public void onClick(View v) { newEvent(); } }),
-                button("Muat semula", false, new View.OnClickListener() { @Override public void onClick(View v) { showEvents(); } })));
-        final LinearLayout list = column();
-        ScrollView sv = new ScrollView(this);
-        sv.addView(list);
-        root.addView(sv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-        root.addView(row(
-                button("Tetapan server", false, new View.OnClickListener() { @Override public void onClick(View v) { serverSettings(); } }),
-                button("Log keluar", false, new View.OnClickListener() { @Override public void onClick(View v) { logout(); } })));
-        setContentView(root);
-        list.addView(text("Memuat…", 14, MUTED, false));
-
-        final LiveApi api = App.api(this);
-        if (api == null) { showLogin(); return; }
-        bg(new Bg() { @Override public Object run() throws Exception {
-            JSONObject me = api.me();
-            return new Object[]{me, api.events()};
-        }}, new Done() { @Override public void ok(Object r) {
-            if (!"events".equals(screen)) return;
-            Object[] a = (Object[]) r;
-            JSONObject me = ((JSONObject) a[0]).optJSONObject("user");
-            JSONArray events = (JSONArray) a[1];
-            who.setText(me.optString("email") + " · " + ("admin".equals(me.optString("role")) ? "Admin (nampak semua event)" : "Jurugambar")
-                    + (((JSONObject) a[0]).optBoolean("storageOnline", true) ? "" : "\n⚠ Storan server offline"));
-            list.removeAllViews();
-            if (events == null || events.length() == 0) list.addView(text("Tiada event lagi. Tekan + EVENT baru.", 14, MUTED, false));
-            else for (int i = 0; i < events.length(); i++) list.addView(eventCard(events.optJSONObject(i)));
-        }});
-    }
-
-    private View eventCard(final JSONObject e) {
-        LinearLayout c = card();
-        String cur = prefs.getString("event_id", "");
-        boolean selected = cur.equals(e.optString("id"));
-        c.addView(text(e.optString("title") + (selected ? "  ●" : ""), 17, selected ? TEAL_LIGHT : Color.WHITE, true));
-        String slot = e.isNull("mySlot") ? "" : " · Photographer " + e.optInt("mySlot");
-        c.addView(text(prettyDate(e.optString("date")) + " · " + e.optInt("photoCount") + " gambar" + slot, 13, MUTED, false));
-        c.addView(text(e.optString("url").replaceFirst("^https?://", ""), 12, TEAL_LIGHT, false));
-        c.addView(row(
-                button("Pilih", true, new View.OnClickListener() { @Override public void onClick(View v) { selectEvent(e); } }),
-                button("Kongsi", false, new View.OnClickListener() { @Override public void onClick(View v) { share(e); } }),
-                button("QR", false, new View.OnClickListener() { @Override public void onClick(View v) {
-                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(App.serverUrl(MainActivity.this) + "/admin#" + e.optString("id"))));
-                }})));
-        c.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { selectEvent(e); } });
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, dp(6), 0, dp(6));
-        c.setLayoutParams(lp);
-        return c;
-    }
-
-    private static String prettyDate(String d) {
-        if (d == null || !d.matches("\\d{8}")) return "";
-        try { return new SimpleDateFormat("d MMM yyyy", new Locale("ms", "MY")).format(new SimpleDateFormat("yyyyMMdd", Locale.US).parse(d)); }
-        catch (Exception x) { return d; }
-    }
-
-    private void share(JSONObject e) {
-        Intent s = new Intent(Intent.ACTION_SEND).setType("text/plain")
-                .putExtra(Intent.EXTRA_TEXT, e.optString("title") + "\nGaleri live: " + e.optString("url"));
-        startActivity(Intent.createChooser(s, "Kongsi pautan galeri"));
-    }
-
-    private void selectEvent(JSONObject e) {
-        String old = prefs.getString("event_id", "");
-        TetherService s = TetherService.get();
-        if (!old.isEmpty() && !old.equals(e.optString("id")) && s != null && s.pending > 0) {
-            toast(s.pending + " gambar dalam giliran masih dihantar ke event sebelum ini");
-        }
-        prefs.edit().putString("event_id", e.optString("id")).putString("event_title", e.optString("title"))
-                .putString("event_folder", e.optString("folder")).putString("event_url", e.optString("url")).apply();
-        showLive();
-    }
-
-    private void newEvent() {
-        LinearLayout f = column();
-        f.setPadding(dp(20), dp(8), dp(20), 0);
-        f.addView(text("Tarikh (YYYYMMDD)", 12, Color.GRAY, false));
-        final EditText eDate = new EditText(this);
-        eDate.setInputType(InputType.TYPE_CLASS_NUMBER);
-        eDate.setText(new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date()));
-        f.addView(eDate);
-        f.addView(text("Nama event", 12, Color.GRAY, false));
-        final EditText eName = new EditText(this);
-        eName.setSingleLine(true);
-        eName.setHint("cth Konvo Tadika Bandar Putra");
-        f.addView(eName);
-        new AlertDialog.Builder(this).setTitle("EVENT baru").setView(f)
-                .setPositiveButton("Cipta", new DialogInterface.OnClickListener() { @Override public void onClick(DialogInterface d, int w) {
-                    final String date = eDate.getText().toString().trim(), name = eName.getText().toString().trim();
-                    if (!date.matches("\\d{8}") || name.isEmpty()) { toast("Isi tarikh YYYYMMDD dan nama event"); return; }
-                    final LiveApi api = App.api(MainActivity.this);
-                    bg(new Bg() { @Override public Object run() throws Exception { return api.createEvent(date, name); } },
-                        new Done() { @Override public void ok(Object r) { toast("Event dicipta"); selectEvent((JSONObject) r); } });
+                    if ("login".equals(screen)) showLogin(null);
                 }})
                 .setNegativeButton("Batal", null).show();
     }
 
     private void logout() {
-        new AlertDialog.Builder(this).setMessage("Log keluar dari app ini? Gambar dalam giliran akan dihantar bila log masuk semula.")
+        new AlertDialog.Builder(this).setMessage("Log keluar? Gambar dalam giliran akan dihantar bila awak masuk semula dengan kod baru untuk event yang sama.")
                 .setPositiveButton("Log keluar", new DialogInterface.OnClickListener() { @Override public void onClick(DialogInterface d, int w) {
                     final LiveApi api = App.api(MainActivity.this);
                     if (api != null) new Thread(new Runnable() { @Override public void run() { api.logout(); } }).start();
                     prefs.edit().remove("token").apply();
                     TetherService s = TetherService.get();
                     if (s != null) s.apiChanged();
-                    showLogin();
+                    showLogin(null);
                 }}).setNegativeButton("Batal", null).show();
+    }
+
+    private void share() {
+        Intent s = new Intent(Intent.ACTION_SEND).setType("text/plain")
+                .putExtra(Intent.EXTRA_TEXT, prefs.getString("event_title", "") + "\nGaleri live: " + prefs.getString("event_url", ""));
+        startActivity(Intent.createChooser(s, "Kongsi pautan galeri"));
     }
 
     // ------------------------------------------------------------------ live tether
 
     private void showLive() {
         screen = "live";
-        LinearLayout root = page(prefs.getString("event_title", "Tiada event"), prefs.getString("event_url", "").replaceFirst("^https?://", ""));
+        long ends = prefs.getLong("ends_at", 0);
+        String sub = "Photographer " + prefs.getInt("slot", 0) + " · " + prefs.getString("photog_name", "")
+                + (ends > 0 ? " · live hingga " + new SimpleDateFormat("HH:mm", Locale.US).format(new Date(ends)) : "");
+        LinearLayout root = page(prefs.getString("event_title", "Tiada event"), sub);
 
         LinearLayout st = card();
         tvCamera = text("Kamera: -", 16, RED, true);
@@ -389,7 +350,8 @@ public class MainActivity extends Activity implements TetherService.Listener {
         final Button quality = button("Format: " + App.qualityLabel(prefs.getInt("quality", 50)), false, null);
         quality.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { chooseQuality(quality); } });
         root.addView(row(quality,
-                button("Tukar event", false, new View.OnClickListener() { @Override public void onClick(View v) { showEvents(); } })));
+                button("Kongsi galeri", false, new View.OnClickListener() { @Override public void onClick(View v) { share(); } }),
+                button("Log keluar", false, new View.OnClickListener() { @Override public void onClick(View v) { logout(); } })));
         root.addView(row(
                 button("Sambung semula kamera", false, new View.OnClickListener() { @Override public void onClick(View v) {
                     TetherService s = TetherService.get();

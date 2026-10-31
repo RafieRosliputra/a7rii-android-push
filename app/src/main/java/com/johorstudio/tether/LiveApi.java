@@ -25,7 +25,7 @@ public class LiveApi {
         public final JSONObject body;
         ApiException(int status, String msg, JSONObject body) { super(msg); this.status = status; this.body = body; }
         /** Network problems, server errors and "storage offline" are worth retrying later. */
-        public boolean retryable() { return status == 0 || status >= 500 || status == 429 || status == 409; }
+        public boolean retryable() { return status == 0 || status >= 500 || status == 429 || status == 409 || status == 401; }
     }
 
     private final String publicUrl;
@@ -120,21 +120,21 @@ public class LiveApi {
 
     // ------------------------------------------------------------ API
 
-    public JSONObject me() throws IOException { return json("GET", "/api/me", null); }
-
-    public JSONArray events() throws IOException { return json("GET", "/api/events", null).optJSONArray("events"); }
-
-    public JSONObject createEvent(String yyyymmdd, String title) throws IOException {
-        return json("POST", "/api/events", obj("date", yyyymmdd, "title", title)).optJSONObject("event");
+    /** Photographer code + name -> {token, slot, name, eventId, event{title,url,endsAt}} */
+    public JSONObject loginCode(String code, String name) throws IOException {
+        return json("POST", "/auth/code", obj("code", code, "name", name, "want", "photographer", "app", true));
     }
+
+    /** Which event / Photographer N this session is for. 401 = code expired or event closed. */
+    public JSONObject shoot() throws IOException { return json("GET", "/api/shoot", null); }
 
     public void logout() {
-        try { json("POST", "/auth/logout", null); } catch (IOException ignored) {}
+        try { json("POST", "/auth/logout", obj("role", "photographer")); } catch (IOException ignored) {}
     }
 
-    /** Start a chunked upload into this user's Photographer N folder. */
+    /** Start a chunked upload into this photographer's "Photographer N" folder (event comes from the session). */
     public JSONObject startUpload(String eventId, String name, long size) throws IOException {
-        return json("POST", "/api/events/" + eventId + "/uploads", obj("name", name, "size", size));
+        return json("POST", "/api/shoot/uploads", obj("name", name, "size", size));
     }
 
     /** How many bytes the server already has (to resume). */
