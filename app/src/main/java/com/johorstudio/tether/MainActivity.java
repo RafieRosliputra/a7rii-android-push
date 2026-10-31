@@ -21,17 +21,27 @@ import android.provider.MediaStore;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
+import android.text.InputType;
 import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.CompoundButton;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
@@ -46,6 +56,10 @@ public class MainActivity extends Activity {
     private final ArrayDeque<String> logLines = new ArrayDeque<>();
     private volatile Worker worker;
     private int savedCount = 0;
+    private CheckBox cbNas;
+    private TextView tvNas, tvNasFolder, tvNasCount;
+    private NasUploader uploader;
+    private int nasUploadedCount = 0;
 
     // ------------------------------------------------------------------ UI
 
@@ -65,6 +79,9 @@ public class MainActivity extends Activity {
         else registerReceiver(usbReceiver, f);
 
         refreshFolderLabel();
+        startUploader();
+        refreshNasLabels();
+        if (cbNas.isChecked()) setNas(nasConfig().valid() ? "sedia (sambung bila ada gambar)" : "belum disetkan", false);
         handleIntent(getIntent());
     }
 
@@ -86,23 +103,23 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(Color.rgb(18, 18, 20));
         root.setPadding(dp(20), dp(32), dp(20), dp(20));
 
-        root.addView(label("JS Tether", 26, true));
-        TextView sub = label("v1.3 · Sony A7R II → telefon (USB, mod PC Remote)", 13, false);
+        root.addView(label("JS Tether", 24, true));
+        TextView sub = label("v2.0 · Sony A7R II → telefon → TrueNAS", 12, false);
         sub.setTextColor(Color.GRAY);
         root.addView(sub);
 
-        tvCamera = label("Kamera: tidak bersambung", 18, true);
+        tvCamera = label("Kamera: tidak bersambung", 17, true);
         tvCamera.setTextColor(Color.rgb(255, 120, 120));
-        tvPull = label("Status: -", 18, false);
-        tvCount = label("Gambar disimpan: 0", 16, false);
-        tvFolder = label("Folder: -", 14, false);
+        tvPull = label("Status: -", 16, false);
+        tvCount = label("Gambar disimpan: 0", 15, false);
+        tvFolder = label("Folder telefon: -", 13, false);
         root.addView(tvCamera);
         root.addView(tvPull);
         root.addView(tvCount);
         root.addView(tvFolder);
 
         Button pick = new Button(this);
-        pick.setText("Pilih folder simpan");
+        pick.setText("Folder telefon");
         pick.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
@@ -111,8 +128,6 @@ public class MainActivity extends Activity {
                 startActivityForResult(i, REQ_PICK_FOLDER);
             }
         });
-        root.addView(pick, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
-
         Button reconnect = new Button(this);
         reconnect.setText("Sambung semula kamera");
         reconnect.setOnClickListener(new View.OnClickListener() {
@@ -127,7 +142,48 @@ public class MainActivity extends Activity {
                 }).start();
             }
         });
-        root.addView(reconnect, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
+        root.addView(row(pick, reconnect));
+
+        // ---- TrueNAS section
+        TextView nasTitle = label("TrueNAS (SMB melalui Tailscale)", 14, true);
+        nasTitle.setTextColor(Color.rgb(120, 180, 255));
+        nasTitle.setPadding(0, dp(14), 0, dp(2));
+        root.addView(nasTitle);
+
+        cbNas = new CheckBox(this);
+        cbNas.setText("Hantar setiap gambar ke TrueNAS");
+        cbNas.setTextColor(Color.WHITE);
+        cbNas.setChecked(prefs.getBoolean("nas_on", false));
+        cbNas.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override public void onCheckedChanged(CompoundButton b, boolean on) {
+                prefs.edit().putBoolean("nas_on", on).apply();
+                if (on && !nasConfig().valid()) showNasSettings();
+                refreshNasLabels();
+            }
+        });
+        root.addView(cbNas);
+
+        tvNas = label("NAS: -", 15, false);
+        tvNasFolder = label("Folder NAS: -", 13, false);
+        tvNasCount = label("Dihantar ke NAS: 0 · Giliran: 0", 13, false);
+        root.addView(tvNas);
+        root.addView(tvNasFolder);
+        root.addView(tvNasCount);
+
+        Button nasSet = new Button(this);
+        nasSet.setText("Tetapan & sambung");
+        nasSet.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showNasSettings(); }
+        });
+        Button nasDir = new Button(this);
+        nasDir.setText("Folder NAS");
+        nasDir.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (!nasConfig().valid()) { showNasSettings(); return; }
+                browseNas(nasConfig().dir);
+            }
+        });
+        root.addView(row(nasSet, nasDir));
 
         TextView logTitle = label("Log", 13, true);
         logTitle.setTextColor(Color.GRAY);
@@ -144,7 +200,245 @@ public class MainActivity extends Activity {
         setContentView(root);
     }
 
+    private LinearLayout row(View a, View b) {
+        LinearLayout r = new LinearLayout(this);
+        r.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(52), 1f);
+        lp.setMargins(0, 0, dp(4), 0);
+        r.addView(a, lp);
+        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(0, dp(52), 1f);
+        lp2.setMargins(dp(4), 0, 0, 0);
+        r.addView(b, lp2);
+        return r;
+    }
+
     private void ui(Runnable r) { runOnUiThread(r); }
+
+    // ------------------------------------------------------------------ TrueNAS
+
+    private NasUploader.Config nasConfig() {
+        NasUploader.Config c = new NasUploader.Config();
+        c.host = prefs.getString("nas_host", "");
+        c.share = prefs.getString("nas_share", "");
+        c.user = prefs.getString("nas_user", "");
+        c.pass = prefs.getString("nas_pass", "");
+        c.domain = prefs.getString("nas_domain", "");
+        c.dir = prefs.getString("nas_dir", "");
+        return c;
+    }
+
+    private void refreshNasLabels() {
+        NasUploader.Config c = nasConfig();
+        tvNasFolder.setText("Folder NAS: " + (c.valid()
+                ? "\\\\" + c.host + "\\" + c.share + (c.dir.isEmpty() ? "" : "\\" + c.dir.replace('/', '\\'))
+                : "belum disetkan"));
+        if (!cbNas.isChecked()) setNas("dimatikan", false);
+    }
+
+    private void setNas(final String text, final boolean ok) {
+        ui(new Runnable() { @Override public void run() {
+            tvNas.setText("NAS: " + text);
+            tvNas.setTextColor(ok ? Color.rgb(120, 230, 140) : Color.rgb(255, 190, 120));
+        }});
+    }
+
+    private void updateNasCount() {
+        ui(new Runnable() { @Override public void run() {
+            tvNasCount.setText("Dihantar ke NAS: " + nasUploadedCount + " · Giliran: " + (uploader == null ? 0 : uploader.pending()));
+        }});
+    }
+
+    private void startUploader() {
+        uploader = new NasUploader(getContentResolver(), nasConfig(), new NasUploader.Listener() {
+            @Override public void onNasStatus(String text, boolean ok) { setNas(text, ok); }
+            @Override public void onNasUploaded(String name, int total) {
+                nasUploadedCount = total;
+                log("NAS ✓ " + name);
+                updateNasCount();
+            }
+            @Override public void onNasQueue(int pending) { updateNasCount(); }
+            @Override public void onNasLog(String s) { log(s); }
+        });
+        uploader.start();
+    }
+
+    private EditText field(LinearLayout parent, String hint, String value, boolean password) {
+        TextView l = new TextView(this);
+        l.setText(hint);
+        l.setTextSize(12);
+        parent.addView(l);
+        EditText e = new EditText(this);
+        e.setSingleLine(true);
+        e.setText(value);
+        if (password) e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        parent.addView(e);
+        return e;
+    }
+
+    private void showNasSettings() {
+        NasUploader.Config c = nasConfig();
+        ScrollView sv = new ScrollView(this);
+        LinearLayout f = new LinearLayout(this);
+        f.setOrientation(LinearLayout.VERTICAL);
+        f.setPadding(dp(20), dp(8), dp(20), dp(8));
+        sv.addView(f);
+        final EditText eHost = field(f, "IP Tailscale / nama TrueNAS (cth 100.101.102.103 atau truenas)", c.host, false);
+        final EditText eShare = field(f, "Nama share SMB (cth photos)", c.share, false);
+        final EditText eUser = field(f, "Username TrueNAS", c.user, false);
+        final EditText ePass = field(f, "Password", c.pass, true);
+        final EditText eDom = field(f, "Domain / workgroup (biasanya kosong)", c.domain, false);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Tetapan TrueNAS")
+                .setView(sv)
+                .setPositiveButton("Simpan & sambung", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        prefs.edit()
+                                .putString("nas_host", eHost.getText().toString().trim())
+                                .putString("nas_share", eShare.getText().toString().trim())
+                                .putString("nas_user", eUser.getText().toString().trim())
+                                .putString("nas_pass", ePass.getText().toString())
+                                .putString("nas_domain", eDom.getText().toString().trim())
+                                .apply();
+                        refreshNasLabels();
+                        uploader.setConfig(nasConfig());
+                        testNas();
+                    }
+                })
+                .setNegativeButton("Batal", null)
+                .show();
+    }
+
+    private interface SmbTask { Object run(SmbClient s) throws Exception; }
+    private interface SmbDone { void done(Object result); }
+
+    /** Run something with a fresh SMB connection on a background thread; result delivered on UI thread. */
+    private void withNas(final String what, final SmbTask task, final SmbDone done) {
+        final NasUploader.Config c = nasConfig();
+        if (!c.valid()) { toast("Isi tetapan TrueNAS dulu"); return; }
+        setNas(what + "…", true);
+        new Thread(new Runnable() {
+            @Override public void run() {
+                SmbClient s = new SmbClient(c.host, c.share, c.user, c.pass, c.domain);
+                s.setLogger(new SmbClient.Logger() { @Override public void log(String m) { MainActivity.this.log(m); } });
+                try {
+                    s.connect();
+                    final Object res = task.run(s);
+                    ui(new Runnable() { @Override public void run() { done.done(res); } });
+                } catch (final Exception e) {
+                    log("NAS: " + e.getMessage());
+                    setNas("ralat: " + e.getMessage(), false);
+                    toast("TrueNAS: " + e.getMessage());
+                } finally {
+                    s.close();
+                }
+            }
+        }).start();
+    }
+
+    private void testNas() {
+        withNas("menguji sambungan", new SmbTask() {
+            @Override public Object run(SmbClient s) throws Exception { return s.list("").size(); }
+        }, new SmbDone() {
+            @Override public void done(Object r) {
+                setNas("bersambung ✓ (" + r + " item dalam share)", true);
+                toast("Berjaya sambung ke TrueNAS");
+                if (prefs.getString("nas_dir", "").isEmpty()) browseNas("");
+            }
+        });
+    }
+
+    private static String parentOf(String dir) {
+        String d = dir.replace('\\', '/');
+        int i = d.lastIndexOf('/');
+        return i <= 0 ? "" : d.substring(0, i);
+    }
+
+    private static String childOf(String dir, String name) {
+        return dir.isEmpty() ? name : dir + "/" + name;
+    }
+
+    /** Folder browser on the NAS: open sub-folders, go up, create a new folder, choose. */
+    private void browseNas(final String dir) {
+        withNas("membaca folder", new SmbTask() {
+            @Override public Object run(SmbClient s) throws Exception { return s.list(dir); }
+        }, new SmbDone() {
+            @SuppressWarnings("unchecked")
+            @Override public void done(Object r) {
+                setNas("bersambung ✓", true);
+                final List<String> folders = new ArrayList<>();
+                for (SmbClient.Entry e : (List<SmbClient.Entry>) r) if (e.dir && !e.name.startsWith(".")) folders.add(e.name);
+                Collections.sort(folders, String.CASE_INSENSITIVE_ORDER);
+                final boolean hasUp = !dir.isEmpty();
+                final List<String> items = new ArrayList<>();
+                if (hasUp) items.add("⬆  ..");
+                for (String n : folders) items.add("📁  " + n);
+                if (folders.isEmpty()) items.add("(tiada sub-folder)");
+
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("\\" + nasConfig().share + (dir.isEmpty() ? "" : "\\" + dir.replace('/', '\\')))
+                        .setItems(items.toArray(new String[0]), new DialogInterface.OnClickListener() {
+                            @Override public void onClick(DialogInterface d, int which) {
+                                if (hasUp && which == 0) { browseNas(parentOf(dir)); return; }
+                                int idx = which - (hasUp ? 1 : 0);
+                                if (idx >= 0 && idx < folders.size()) browseNas(childOf(dir, folders.get(idx)));
+                                else browseNas(dir);
+                            }
+                        })
+                        .setPositiveButton("Pilih folder ini", new DialogInterface.OnClickListener() {
+                            @Override public void onClick(DialogInterface d, int w) {
+                                prefs.edit().putString("nas_dir", dir).apply();
+                                refreshNasLabels();
+                                uploader.setConfig(nasConfig());
+                                log("Folder NAS dipilih: \\" + nasConfig().share + "\\" + dir.replace('/', '\\'));
+                                if (!cbNas.isChecked()) cbNas.setChecked(true);
+                            }
+                        })
+                        .setNeutralButton("Folder baru", new DialogInterface.OnClickListener() {
+                            @Override public void onClick(DialogInterface d, int w) { newNasFolder(dir); }
+                        })
+                        .setNegativeButton("Batal", null)
+                        .show();
+            }
+        });
+    }
+
+    private void newNasFolder(final String dir) {
+        final EditText e = new EditText(this);
+        e.setSingleLine(true);
+        e.setHint("cth Konvo Tadika 2026");
+        e.setText(new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date()) + " ");
+        e.setSelection(e.getText().length());
+        LinearLayout box = new LinearLayout(this);
+        box.setPadding(dp(20), dp(8), dp(20), 0);
+        box.addView(e, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        new AlertDialog.Builder(this)
+                .setTitle("Folder baru dalam \\" + (dir.isEmpty() ? nasConfig().share : dir.replace('/', '\\')))
+                .setView(box)
+                .setPositiveButton("Cipta", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        final String name = e.getText().toString().trim().replaceAll("[\\\\/:*?\"<>|]", "-");
+                        if (name.isEmpty()) { browseNas(dir); return; }
+                        final String path = childOf(dir, name);
+                        withNas("mencipta folder", new SmbTask() {
+                            @Override public Object run(SmbClient s) throws Exception { return s.mkdir(path); }
+                        }, new SmbDone() {
+                            @Override public void done(Object r) {
+                                log(Boolean.TRUE.equals(r) ? "Folder NAS dicipta: " + name : "Folder sudah wujud: " + name);
+                                browseNas(path);
+                            }
+                        });
+                    }
+                })
+                .setNegativeButton("Batal", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) { browseNas(dir); }
+                })
+                .show();
+    }
+
+    private void toast(final String s) {
+        ui(new Runnable() { @Override public void run() { Toast.makeText(MainActivity.this, s, Toast.LENGTH_LONG).show(); } });
+    }
 
     private void setCamera(final String text, final boolean ok) {
         ui(new Runnable() { @Override public void run() {
@@ -201,7 +495,7 @@ public class MainActivity extends Activity {
 
     private void refreshFolderLabel() {
         Uri t = treeUri();
-        tvFolder.setText("Folder: " + (t != null ? prettyTree(t)
+        tvFolder.setText("Folder telefon: " + (t != null ? prettyTree(t)
                 : (Build.VERSION.SDK_INT >= 29 ? "Pictures/JS Tether (default)" : "belum dipilih")));
     }
 
@@ -311,6 +605,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         stopWorker();
+        if (uploader != null) uploader.shutdown();
         try { unregisterReceiver(usbReceiver); } catch (Exception ignored) {}
         super.onDestroy();
     }
@@ -497,6 +792,10 @@ public class MainActivity extends Activity {
             ui(new Runnable() { @Override public void run() { tvCount.setText("Gambar disimpan: " + c); } });
             setPull("Siap: " + fname);
             log(String.format(Locale.US, "Disimpan %s (%.1f s, %.1f MB/s)", fname, secs, size / 1048576.0 / secs));
+            if (cbNas.isChecked() && uploader != null) {
+                uploader.enqueue(t.uri, fname, size);
+                updateNasCount();
+            }
             return true;
         }
     }
