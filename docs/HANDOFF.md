@@ -1,4 +1,32 @@
-# Nota serah-tugas (31 Okt 2026, malam)
+# Nota serah-tugas v4 (1 Nov 2026)
+
+Branch **`v4`** (server, web, moderator, app, deploy). `v3` = versi login email/Google (diganti). Pelan & 53 jawapan Rafi: lihat bahagian "Keputusan v4" di bawah.
+
+## Apa berubah dalam v4
+- **Login tanpa email:** setiap event ada 3 kod 6 digit: **tetamu** (dipapar di LED, tukar setiap kali event live/ditutup), **photographer** (kod + nama → Photographer N auto), **penganjur/client** (panel /panel, sah hingga 7 hari selepas event).
+- **Admin** = Cloudflare Access app "JS Live Photo Admin" (live.johorstudio.com/admin + /api/admin), policy "Live Photo admins" (rafierosliputra@ + johorstudio@gmail.com). AUD dalam deploy/compose.yaml.
+- **Event live 8 jam** dari masa mula yang admin set; +1/+2 jam; Close = semua tetamu/photographer log keluar + kod tetamu baru. Amaran jika > 3 event live serentak.
+- **Laman utama:** popup "Looking for your event?" (6 kotak) bila ada event live, "Sign in as photographer" kecil, butang merah berdenyut **LIVE PHOTO ACTIVE** + nama event (admin boleh sorok nama), footer kecil Organiser / Admin. QR `/c/123456` isi kod automatik.
+- **Tetamu:** kod → galeri; sebelum upload pertama: notis "Show us your best shot from tonight!" + tanda setuju + nama pilihan (20 aksara); had 30 gambar/telefon/event; 3 salah kod = kunci 30 minit (papar baki cubaan).
+- **Tapisan AI** (`moderator/`, Python, CPU m10): NSFW (Falconsai) + CLIP zero-shot (politik, dokumen/screenshot, keganasan, tiada orang, isyarat lucah) + OCR (>15% teks). Bersih → terus; ragu → "To review"; lucah jelas → Blocked (disimpan). Gambar photographer tak ditapis. Nama ditapis senarai kata.
+- **Big screen** `/show/<event>`: gambar baru slide dari tepi ~50% skrin (masa admin set), kemudian sambung loop dari gambar seterusnya; tiada gambar baru N minit → gelembung "Upload your photos!"; footer "Upload photo here · live.johorstudio.com · Code 123 456".
+- **App v4:** login kod photographer + nama (tiada senarai event), "Return to app" dari /shoot?app=1.
+- **johorstudio.com:** tab LIVEPHOTO berdenyut merah bila ada event live (branch `livephoto-tab` dalam repo johorstudio-website, belum merge).
+
+## Langkah Rafi
+1. Mac: `cd ~/Desktop/ai/claude/projects/live-upload && git fetch origin && git checkout v4 && ./deploy/install.sh` (naik taraf v3 → v4; kali pertama moderator muat turun model ~1 GB).
+2. GitHub: merge `livephoto-tab` ke `main` dalam johorstudio-website, kemudian jalankan update website seperti biasa.
+3. Bina APK v4: `./build-local.sh` (versi 4.0).
+4. Cipta repo kosong `johorstudio-livephoto` supaya server dipindahkan (jawapan #53).
+
+## Belum diuji pada mesin sebenar
+- Moderator dengan model sebenar (hanya logik keputusan diuji; versi pakej disemat dalam moderator/requirements.txt).
+- Cloudflare Access JWT sebenar (diuji dengan kunci olok-olok dalam ujian).
+- APK v4 pada telefon.
+
+---
+
+# (Lama) Nota serah-tugas v3 (31 Okt 2026, malam)
 
 Baca fail ini dahulu, kemudian `docs/v3-live-photo-pelan.md`. Semua kerja v3 ada di **branch `v3`** (`main` kekal v2.0 sehingga v3 diuji).
 
