@@ -94,7 +94,56 @@ public class LiveApi {
         } catch (ApiException e) {
             throw e;
         } catch (IOException e) {
-            throw new ApiException(0, "Tiada sambungan ke server (" + e.getMessage() + ")", null);
+            throw new ApiException(0, "No connection to server (" + e.getMessage() + ")", null);
+        }
+    }
+
+    /** Binary variant of call(): same base-url fallback, but returns the raw response body. */
+    private byte[] requestBinary(String base, String method, String path, int timeoutMs) throws IOException {
+        HttpURLConnection c = (HttpURLConnection) new URL(base + path).openConnection();
+        c.setConnectTimeout(base.equals(fastUrl) ? 2500 : 10000);
+        c.setReadTimeout(timeoutMs);
+        c.setRequestMethod(method);
+        c.setRequestProperty("Accept", "image/jpeg,image/webp,application/octet-stream,*/*");
+        c.setRequestProperty("User-Agent", "JSTether/4");
+        if (token != null) c.setRequestProperty("Authorization", "Bearer " + token);
+        try {
+            int code = c.getResponseCode();
+            InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
+            if (code >= 400) {
+                String text = in == null ? "" : readAll(in);
+                JSONObject json;
+                try { json = text.isEmpty() ? new JSONObject() : new JSONObject(text); }
+                catch (JSONException e) { json = new JSONObject(); }
+                throw new ApiException(code, json.optString("error", "HTTP " + code), json);
+            }
+            return in == null ? new byte[0] : readBytes(in);
+        } finally {
+            c.disconnect();
+        }
+    }
+
+    private byte[] callBinary(String method, String path, int timeoutMs) throws IOException {
+        if (fastUrl != null) {
+            try {
+                byte[] r = requestBinary(fastUrl, method, path, timeoutMs);
+                working = fastUrl;
+                return r;
+            } catch (ApiException e) {
+                working = fastUrl;
+                throw e;
+            } catch (IOException ignored) {
+                // Tailscale off or unreachable: use the public domain
+            }
+        }
+        try {
+            byte[] r = requestBinary(publicUrl, method, path, timeoutMs);
+            working = publicUrl;
+            return r;
+        } catch (ApiException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new ApiException(0, "No connection to server (" + e.getMessage() + ")", null);
         }
     }
 
@@ -109,6 +158,15 @@ public class LiveApi {
         while ((n = in.read(buf)) > 0) b.write(buf, 0, n);
         in.close();
         return new String(b.toByteArray(), UTF8);
+    }
+
+    private static byte[] readBytes(InputStream in) throws IOException {
+        ByteArrayOutputStream b = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = in.read(buf)) > 0) b.write(buf, 0, n);
+        in.close();
+        return b.toByteArray();
     }
 
     private static JSONObject obj(Object... kv) {
@@ -171,5 +229,22 @@ public class LiveApi {
 
     public JSONObject complete(String uploadId) throws IOException {
         return json("POST", "/api/uploads/" + uploadId + "/complete", null).optJSONObject("photo");
+    }
+
+    // ------------------------------------------------------------ uploaded photos
+
+    /** This photographer's photos, newest first. before=<seq> pages backward; null = first page. */
+    public JSONObject listPhotos(Long before) throws IOException {
+        return json("GET", before == null ? "/api/shoot/photos" : "/api/shoot/photos?before=" + before, null);
+    }
+
+    /** Delete one of this photographer's photos. */
+    public void deletePhoto(String id) throws IOException {
+        call("DELETE", "/api/shoot/photos/" + id, null, null, 20000);
+    }
+
+    /** Download a photo image (480 or 1600). Returns the raw image bytes. */
+    public byte[] photoBytes(String id, int size) throws IOException {
+        return callBinary("GET", "/api/shoot/photos/" + id + "/" + size, 30000);
     }
 }

@@ -23,5 +23,5 @@ public final class App {
 
     public static final int[] QUALITIES = {40, 50, 60, 70, 80, 90, UploadQueue.QUALITY_JPG};
 
-    public static String qualityLabel(int q) { return q == UploadQueue.QUALITY_JPG ? "JPG penuh" : "WebP " + q + "%"; }
+    public static String qualityLabel(int q) { return q == UploadQueue.QUALITY_JPG ? "Full JPG" : "WebP " + q + "%"; }
 }

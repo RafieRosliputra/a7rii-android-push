@@ -48,6 +48,11 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <activity
+            android:name=".PhotosActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
         <service
             android:name=".TetherService"
             android:exported="false"

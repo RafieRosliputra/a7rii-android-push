@@ -123,7 +123,7 @@ public class Ptp {
             if (n <= 0) break;
             total += n;
         }
-        if (total > 0) dbg("Buang " + total + " bait data lama");
+        if (total > 0) dbg("Discarded " + total + " bytes of stale data");
     }
 
     public static UsbInterface findPtpInterface(UsbDevice dev) {
@@ -138,7 +138,7 @@ public class Ptp {
 
     public static Ptp open(UsbManager mgr, UsbDevice dev) throws IOException {
         UsbInterface intf = findPtpInterface(dev);
-        if (intf == null) throw new IOException("Tiada interface PTP/MTP pada peranti ini");
+        if (intf == null) throw new IOException("No PTP/MTP interface on this device");
         UsbEndpoint in = null, out = null, intr = null;
         for (int i = 0; i < intf.getEndpointCount(); i++) {
             UsbEndpoint e = intf.getEndpoint(i);
@@ -148,10 +148,10 @@ public class Ptp {
                 intr = e;
             }
         }
-        if (in == null || out == null) throw new IOException("Endpoint bulk tidak dijumpai");
+        if (in == null || out == null) throw new IOException("Bulk endpoint not found");
         UsbDeviceConnection c = mgr.openDevice(dev);
-        if (c == null) throw new IOException("Gagal buka peranti USB (tiada kebenaran?)");
-        if (!c.claimInterface(intf, true)) { c.close(); throw new IOException("Gagal claim interface USB"); }
+        if (c == null) throw new IOException("Failed to open USB device (no permission?)");
+        if (!c.claimInterface(intf, true)) { c.close(); throw new IOException("Failed to claim USB interface"); }
         return new Ptp(c, intf, in, out, intr);
     }
 
@@ -169,7 +169,7 @@ public class Ptp {
             int n = Build.VERSION.SDK_INT >= 28
                     ? conn.bulkTransfer(epOut, data, off, chunk, 5000)
                     : bulkOutCompat(data, off, chunk);
-            if (n < 0) throw new IOException("USB tulis gagal");
+            if (n < 0) throw new IOException("USB write failed");
             off += n;
         }
     }
@@ -223,11 +223,11 @@ public class Ptp {
         while (true) {
             int n = readPacket((op == OC_GetObject || op == OC_GetObjectInfo) ? 20000 : 5000);
             if (n < 0) {
-                throw new IOException(String.format("USB baca gagal (op 0x%04X, %d ms, bufsz %d)",
+                throw new IOException(String.format("USB read failed (op 0x%04X, %d ms, bufsz %d)",
                         op, System.currentTimeMillis() - t0, cur.length));
             }
-            if (n == 0) { if (++zeroReads > 3) throw new IOException("Tiada respons daripada kamera"); continue; }
-            if (n < 12) throw new IOException("Paket PTP terlalu pendek (" + n + ")");
+            if (n == 0) { if (++zeroReads > 3) throw new IOException("No response from camera"); continue; }
+            if (n < 12) throw new IOException("PTP packet too short (" + n + ")");
             byte[] buf = cur;
             ByteBuffer h = le(buf, 0, n);
             long len = h.getInt() & 0xFFFFFFFFL;
@@ -238,12 +238,12 @@ public class Ptp {
             // Not a container header for this transaction → stale data from an earlier transfer; skip it.
             boolean valid = len >= 12 && (type == TYPE_DATA || type == TYPE_RESPONSE);
             if (!valid || ptid != myTid) {
-                if (++junk > 2000) throw new IOException("Aliran USB rosak (tidak dapat selaras semula)");
+                if (++junk > 2000) throw new IOException("USB stream corrupt (cannot resync)");
                 if (valid && type == TYPE_DATA) {          // whole old data phase: discard it
                     long left = len - n;
                     while (left > 0) { int m = readPacket(3000); if (m <= 0) break; left -= m; }
                 }
-                if (junk == 1) dbg(String.format("Buang paket lama (tid %d, mahu %d)", ptid, myTid));
+                if (junk == 1) dbg(String.format("Discarding stale packet (tid %d, want %d)", ptid, myTid));
                 continue;
             }
 
@@ -256,7 +256,7 @@ public class Ptp {
                 if (progress != null) progress.onProgress(got, total);
                 while (got < total) {
                     int m = readPacket(15000);
-                    if (m < 0) throw new IOException("USB baca data gagal");
+                    if (m < 0) throw new IOException("USB data read failed");
                     if (m == 0) continue;
                     int use = (int) Math.min(m, total - got);
                     os.write(buf, 0, use);
@@ -324,7 +324,7 @@ public class Ptp {
 
     public DeviceInfo getDeviceInfo() throws IOException {
         Response r = transact(OC_GetDeviceInfo);
-        if (!r.ok() || r.data == null) throw new IOException(String.format("GetDeviceInfo gagal 0x%04X", r.code));
+        if (!r.ok() || r.data == null) throw new IOException(String.format("GetDeviceInfo failed 0x%04X", r.code));
         ByteBuffer b = ByteBuffer.wrap(r.data).order(ByteOrder.LITTLE_ENDIAN);
         DeviceInfo d = new DeviceInfo();
         try {
@@ -349,7 +349,7 @@ public class Ptp {
     public ObjectInfo getObjectInfo(int handle) throws IOException {
         Response r = transact(OC_GetObjectInfo, handle);
         if (!r.ok() || r.data == null || r.data.length < 53)
-            throw new IOException(String.format("GetObjectInfo gagal 0x%04X", r.code));
+            throw new IOException(String.format("GetObjectInfo failed 0x%04X", r.code));
         ByteBuffer b = ByteBuffer.wrap(r.data).order(ByteOrder.LITTLE_ENDIAN);
         ObjectInfo o = new ObjectInfo();
         o.storageId = b.getInt(0);
@@ -366,7 +366,7 @@ public class Ptp {
     public void openSession() throws IOException {
         Response r = transact(OC_OpenSession, 1);
         if (r.code != RC_OK && r.code != RC_SessionAlreadyOpen)
-            throw new IOException(String.format("OpenSession gagal 0x%04X", r.code));
+            throw new IOException(String.format("OpenSession failed 0x%04X", r.code));
     }
 
     public void closeSession() {
@@ -449,14 +449,14 @@ public class Ptp {
     /** List storage IDs (0x1004). */
     public int[] getStorageIDs() throws IOException {
         Response r = transact(OC_GetStorageIDs);
-        if (!r.ok() || r.data == null) throw new IOException(String.format("GetStorageIDs gagal 0x%04X", r.code));
+        if (!r.ok() || r.data == null) throw new IOException(String.format("GetStorageIDs failed 0x%04X", r.code));
         return u32Array(r.data);
     }
 
     /** Object handles on one storage, all formats, root parent (0x1007). */
     public int[] getObjectHandles(int storageId) throws IOException {
         Response r = transact(OC_GetObjectHandles, storageId, 0, 0xFFFFFFFF);
-        if (!r.ok() || r.data == null) throw new IOException(String.format("GetObjectHandles gagal 0x%04X", r.code));
+        if (!r.ok() || r.data == null) throw new IOException(String.format("GetObjectHandles failed 0x%04X", r.code));
         return u32Array(r.data);
     }
 
@@ -470,7 +470,7 @@ public class Ptp {
     /** First `count` bytes of an object (0x101B), for the EXIF-thumbnail fallback. */
     public void getPartialObject(int handle, int offset, int count, OutputStream sink, Progress p) throws IOException {
         Response r = transact(OC_GetPartialObject, new int[]{handle, offset, count}, null, sink, p);
-        if (!r.ok()) throw new IOException(String.format("GetPartialObject gagal 0x%04X", r.code));
+        if (!r.ok()) throw new IOException(String.format("GetPartialObject failed 0x%04X", r.code));
     }
 
     /** Browse helper: every object handle across every storage (all formats, root parent). */

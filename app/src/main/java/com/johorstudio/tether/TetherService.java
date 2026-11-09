@@ -53,7 +53,7 @@ public class TetherService extends Service {
     public static void setListener(Listener l) { listener = l; }
 
     // status (read by the activity)
-    public volatile String camera = "tidak bersambung", stage = "-", server = "-";
+    public volatile String camera = "disconnected", stage = "-", server = "-";
     public volatile boolean cameraOk, serverOk;
     public volatile int saved, uploaded, pending;
     public final ArrayDeque<String> logs = new ArrayDeque<>();
@@ -94,7 +94,7 @@ public class TetherService extends Service {
         });
         queue.start();
         pending = queue.pending();
-        server = App.token(this) == null ? "belum log masuk" : "sedia";
+        server = App.token(this) == null ? "not logged in" : "ready";
         // Wake the queue up as soon as a network comes back.
         if (Build.VERSION.SDK_INT >= 24) {
             netCb = new ConnectivityManager.NetworkCallback() {
@@ -119,11 +119,11 @@ public class TetherService extends Service {
         Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, CHANNEL) : new Notification.Builder(this);
         String ev = prefs.getString("event_title", "");
         b.setSmallIcon(android.R.drawable.ic_menu_camera)
-                .setContentTitle("JS Live · " + saved + " disimpan · " + pending + " giliran")
-                .setContentText((cameraOk ? "Kamera ✓" : "Kamera ✗") + " · " + (ev.isEmpty() ? "tiada event" : ev))
+                .setContentTitle("JS Live · " + saved + " saved · " + pending + " queued")
+                .setContentText((cameraOk ? "Camera ✓" : "Camera ✗") + " · " + (ev.isEmpty() ? "no event" : ev))
                 .setContentIntent(pi)
                 .setOngoing(true)
-                .addAction(new Notification.Action.Builder(null, "Berhenti", ps).build());
+                .addAction(new Notification.Action.Builder(null, "Stop", ps).build());
         return b.build();
     }
 
@@ -174,7 +174,7 @@ public class TetherService extends Service {
     /** Login changed (token / server URL): give the queue a new client. */
     public void apiChanged() {
         queue.setApi(App.api(this));
-        server = App.token(this) == null ? "belum log masuk" : "sedia";
+        server = App.token(this) == null ? "not logged in" : "ready";
         changed();
     }
     public int clearQueue() { return queue.clear(); }
@@ -187,7 +187,7 @@ public class TetherService extends Service {
     public void addManual(final java.util.List<Uri> uris) {
         new Thread(new Runnable() { @Override public void run() {
             String eventId = prefs.getString("event_id", "");
-            if (eventId.isEmpty()) { log("Log masuk dengan kod photographer dulu"); return; }
+            if (eventId.isEmpty()) { log("Log in with the photographer code first"); return; }
             java.util.List<Uri> ok = new java.util.ArrayList<>();
             java.util.List<String> names = new java.util.ArrayList<>(), keys = new java.util.ArrayList<>();
             for (Uri u : uris) {
@@ -203,18 +203,18 @@ public class TetherService extends Service {
                 } catch (Exception ignored) {
                 } finally { if (c != null) c.close(); }
                 boolean jpg = (type != null && type.equals("image/jpeg")) || name.toLowerCase(Locale.US).matches(".*\\.jpe?g$");
-                if (!jpg) { log(name + " bukan JPEG, tidak dihantar"); continue; }
+                if (!jpg) { log(name + " is not JPEG, not sent"); continue; }
                 ok.add(u); names.add(name); keys.add(UploadQueue.keyFor(getContentResolver(), u, name, size, mod));
             }
             java.util.Set<String> sent = new java.util.HashSet<>();
             try { if (!keys.isEmpty()) sent = App.api(TetherService.this).sentKeys(keys); }
-            catch (Exception e) { log("Tak dapat semak server sekarang, semak semasa upload"); }
+            catch (Exception e) { log("Cannot check the server now, will check during upload"); }
             int added = 0, skipped = 0;
             for (int i = 0; i < ok.size(); i++) {
                 if (sent.contains(keys.get(i))) { queue.markSent(names.get(i), keys.get(i)); skipped++; continue; }
                 if (queue.add(ok.get(i), names.get(i), eventId, prefs.getInt("quality", 50), keys.get(i))) added++; else skipped++;
             }
-            log("Upload manual: " + added + " masuk giliran" + (skipped > 0 ? ", " + skipped + " sudah ada (dilangkau)" : ""));
+            log("Manual upload: " + added + " queued" + (skipped > 0 ? ", " + skipped + " already there (skipped)" : ""));
             changed();
         }}).start();
     }
@@ -227,14 +227,14 @@ public class TetherService extends Service {
         for (UsbDevice d : usb.getDeviceList().values()) {
             if (Ptp.findPtpInterface(d) != null) { connect(d); return; }
         }
-        setCamera("tidak bersambung", false);
-        stage = "Sambungkan kamera dengan kabel USB-C/OTG";
+        setCamera("disconnected", false);
+        stage = "Connect the camera with a USB-C/OTG cable";
         changed();
     }
 
     public void connect(UsbDevice d) {
         if (worker != null) return;
-        if (!usb.hasPermission(d)) { setCamera("tiada kebenaran USB", false); return; }
+        if (!usb.hasPermission(d)) { setCamera("no USB permission", false); return; }
         worker = new Worker(d);
         worker.start();
     }
@@ -251,9 +251,9 @@ public class TetherService extends Service {
     public void detached(UsbDevice d) {
         Worker w = worker;
         if (w != null && d != null && d.getDeviceName().equals(w.dev.getDeviceName())) {
-            log("Kamera dicabut");
+            log("Camera unplugged");
             stopWorker();
-            setCamera("tidak bersambung", false);
+            setCamera("disconnected", false);
             stage = "-";
             changed();
         }
@@ -287,7 +287,7 @@ public class TetherService extends Service {
         if (tree != null) {
             Uri dir = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree));
             t.uri = DocumentsContract.createDocument(cr, dir, mimeFor(name), name);
-            if (t.uri == null) throw new IOException("Gagal cipta fail dalam folder (pilih folder semula?)");
+            if (t.uri == null) throw new IOException("Failed to create file in folder (choose the folder again?)");
         } else if (Build.VERSION.SDK_INT >= 29) {
             ContentValues v = new ContentValues();
             v.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
@@ -296,12 +296,12 @@ public class TetherService extends Service {
             String ev = prefs.getString("event_folder", "");
             v.put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/JS Tether" + (ev.isEmpty() ? "" : "/" + ev.replaceAll("[\\\\/:*?\"<>|]", "-")));
             t.uri = cr.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v);
-            if (t.uri == null) throw new IOException("MediaStore insert gagal");
+            if (t.uri == null) throw new IOException("MediaStore insert failed");
         } else {
-            throw new IOException("Sila pilih folder simpan dulu");
+            throw new IOException("Please choose a save folder first");
         }
         t.os = cr.openOutputStream(t.uri, "w");
-        if (t.os == null) throw new IOException("Tidak dapat buka fail untuk ditulis");
+        if (t.os == null) throw new IOException("Cannot open file for writing");
         return t;
     }
 
@@ -317,9 +317,9 @@ public class TetherService extends Service {
     private void saved(Uri uri, String fname) {
         String eventId = prefs.getString("event_id", "");
         boolean jpg = fname.toLowerCase(Locale.US).matches(".*\\.jpe?g$");
-        if (eventId.isEmpty()) { log("Tiada event dipilih: " + fname + " disimpan dalam telefon sahaja"); return; }
+        if (eventId.isEmpty()) { log("No event selected: " + fname + " saved on the phone only"); return; }
         if (!prefs.getBoolean("upload_on", true)) return;
-        if (!jpg) { log(fname + " bukan JPEG, tidak dihantar (set kamera ke JPEG atau RAW+JPEG)"); return; }
+        if (!jpg) { log(fname + " is not JPEG, not sent (set the camera to JPEG or RAW+JPEG)"); return; }
         queue.add(uri, fname, eventId, prefs.getInt("quality", 50));
     }
 
@@ -337,7 +337,7 @@ public class TetherService extends Service {
 
         @Override public void run() {
             try {
-                setCamera("menyambung…", false);
+                setCamera("connecting…", false);
                 ptp = Ptp.open(usb, dev);
                 ptp.setLogger(new Ptp.Logger() { @Override public void log(String s) { TetherService.this.log(s); } });
                 log(String.format("USB %04X:%04X %s", dev.getVendorId(), dev.getProductId(), ptp.describe()));
@@ -347,32 +347,32 @@ public class TetherService extends Service {
                 for (int attempt = 1; attempt <= 3 && running; attempt++) {
                     try { di = ptp.getDeviceInfo(); break; }
                     catch (IOException e) {
-                        log("Cubaan " + attempt + ": " + e.getMessage() + " → reset USB");
+                        log("Attempt " + attempt + ": " + e.getMessage() + " → reset USB");
                         ptp.resetDevice();
                     }
                 }
-                if (di == null) throw new IOException("Kamera tidak membalas. Matikan & hidupkan kamera, kemudian cuba lagi");
+                if (di == null) throw new IOException("Camera not responding. Turn the camera off and on, then try again");
                 String name = (di.manufacturer + " " + di.model).trim();
-                if (name.isEmpty()) name = dev.getProductName() != null ? dev.getProductName() : "Kamera";
-                log("Dijumpai: " + name + " (ext 0x" + Integer.toHexString(di.vendorExtId) + " " + di.vendorExtDesc + ")");
+                if (name.isEmpty()) name = dev.getProductName() != null ? dev.getProductName() : "Camera";
+                log("Found: " + name + " (ext 0x" + Integer.toHexString(di.vendorExtId) + " " + di.vendorExtDesc + ")");
                 try { ptp.openSession(); }
                 catch (IOException e) {
-                    log("OpenSession: " + e.getMessage() + " → reset & cuba lagi");
+                    log("OpenSession: " + e.getMessage() + " → reset & try again");
                     ptp.resetDevice();
                     ptp.openSession();
                 }
                 boolean sony = di.supportsOp(Ptp.OC_Sony_SDIOConnect);
                 if (sony) {
-                    log("Mod PC Remote dikesan, handshake Sony…");
+                    log("PC Remote mode detected, Sony handshake…");
                     try { ptp.sonyHandshake(); }
-                    catch (IOException e) { log("Handshake Sony: " + e.getMessage()); }
+                    catch (IOException e) { log("Sony handshake: " + e.getMessage()); }
                     setCamera(name + " ✓ (PC Remote)", true);
                 } else {
                     setCamera(name + " ✓ (MTP/PTP)", true);
                     if (dev.getVendorId() == 0x054C)
-                        log("Kamera dalam mod MTP. Untuk tether: Menu → USB Connection → PC Remote");
+                        log("Camera is in MTP mode. For tethering: Menu → USB Connection → PC Remote");
                 }
-                setStage("Menunggu gambar… (tekan shutter)");
+                setStage("Waiting for photos… (press the shutter)");
 
                 boolean pendingShot = false;
                 long pendingSince = 0, lastPoll = 0;
@@ -385,7 +385,7 @@ public class TetherService extends Service {
                         if (e.code != 0xC203) log(String.format("Event 0x%04X p=0x%08X", e.code, p0));
                         if (sony && (e.code == Ptp.EC_Sony_ObjectAdded || e.code == Ptp.EC_ObjectAdded)) {
                             pendingShot = true; pendingSince = now;
-                            setStage("Kamera sedang proses gambar…");
+                            setStage("Camera is processing the photo…");
                         } else if (!sony && e.code == Ptp.EC_ObjectAdded) {
                             try { pull(p0, false); errors = 0; }
                             catch (IOException ex) { errors = onImageError(ex, errors); }
@@ -396,17 +396,17 @@ public class TetherService extends Service {
                         try {
                             int v = ptp.sonyObjectInMemory();
                             if (v > 0x8000) {
-                                log(String.format("ObjectInMemory 0x%04X → tarik", v));
+                                log(String.format("ObjectInMemory 0x%04X → pull", v));
                                 drainSony();
                                 pendingShot = false;
                             } else if (pendingShot && v < 0 && now - pendingSince > 1500) {
-                                log("ObjectInMemory tak dapat dibaca, cuba tarik terus");
+                                log("ObjectInMemory could not be read, trying a direct pull");
                                 drainSony();
                                 pendingShot = false;
                             } else if (pendingShot && now - pendingSince > 30000) {
-                                log("Tiada gambar dalam buffer kamera selepas 30 s (semak Still Img. Save Dest.)");
+                                log("No photo in the camera buffer after 30 s (check Still Img. Save Dest.)");
                                 pendingShot = false;
-                                setStage("Menunggu gambar… (tekan shutter)");
+                                setStage("Waiting for photos… (press the shutter)");
                             }
                             errors = 0;
                         } catch (IOException ex) {
@@ -416,9 +416,9 @@ public class TetherService extends Service {
                 }
             } catch (Exception ex) {
                 if (running) {
-                    log("Ralat: " + ex.getMessage());
-                    setCamera("ralat sambungan", false);
-                    setStage("Cabut & sambung semula kamera, atau tekan 'Sambung semula'");
+                    log("Error: " + ex.getMessage());
+                    setCamera("connection error", false);
+                    setStage("Unplug and reconnect the camera, or tap 'Reconnect'");
                 }
             } finally {
                 if (ptp != null) { if (running) ptp.closeSession(); ptp.close(); }
@@ -428,10 +428,10 @@ public class TetherService extends Service {
 
         private int onImageError(IOException ex, int errors) throws IOException {
             errors++;
-            log("Ralat gambar (" + errors + "): " + ex.getMessage());
+            log("Photo error (" + errors + "): " + ex.getMessage());
             ptp.drain();
-            setStage("Ralat semasa tarik, menunggu gambar seterusnya…");
-            if (errors >= 5) throw new IOException("Terlalu banyak ralat berturut-turut");
+            setStage("Error while pulling, waiting for the next photo…");
+            if (errors >= 5) throw new IOException("Too many consecutive errors");
             return errors;
         }
 
@@ -441,7 +441,7 @@ public class TetherService extends Service {
                 int v = ptp.sonyObjectInMemory();
                 if (v >= 0 && v <= 0x8000) break;
             }
-            setStage("Menunggu gambar… (tekan shutter)");
+            setStage("Waiting for photos… (press the shutter)");
         }
 
         private boolean pull(int handle, boolean sonyQueue) throws IOException {
@@ -457,13 +457,13 @@ public class TetherService extends Service {
             if (oi.format == 0x3001) return false;
             String fname = oi.filename.isEmpty() ? String.format("IMG_%08X.JPG", handle) : oi.filename;
             if (!fname.matches("[A-Za-z0-9._ -]{1,64}"))
-                throw new IOException("Maklumat gambar rosak (nama fail tidak sah), cuba lagi");
+                throw new IOException("Corrupt photo info (invalid filename), try again");
             String key = fname + "|" + oi.size;
             if (recent.contains(key)) return false;
 
             long size = oi.size & 0xFFFFFFFFL;
-            setStage("Menarik " + fname + " (" + mb(size) + ")…");
-            log("Menarik " + fname + " " + mb(size));
+            setStage("Pulling " + fname + " (" + mb(size) + ")…");
+            log("Pulling " + fname + " " + mb(size));
             long t0 = System.currentTimeMillis();
             Target t = openTarget(fname);
             final String fn = fname;
@@ -475,7 +475,7 @@ public class TetherService extends Service {
                         long now = System.currentTimeMillis();
                         if (now - lastUi[0] > 200) {
                             lastUi[0] = now;
-                            setStage("Menarik " + fn + " " + (total > 0 ? (int) (done * 100 / total) : 0) + "%");
+                            setStage("Pulling " + fn + " " + (total > 0 ? (int) (done * 100 / total) : 0) + "%");
                         }
                     }
                 });
@@ -487,15 +487,15 @@ public class TetherService extends Service {
             }
             if (!r.ok()) {
                 deleteTarget(t);
-                log(String.format("GetObject gagal 0x%04X", r.code));
+                log(String.format("GetObject failed 0x%04X", r.code));
                 return false;
             }
             recent.add(key);
             if (recent.size() > 100) recent.remove(recent.iterator().next());
             double secs = Math.max(0.001, (System.currentTimeMillis() - t0) / 1000.0);
             saved++;
-            setStage("Disimpan: " + fname);
-            log(String.format(Locale.US, "Disimpan %s (%.1f s, %.1f MB/s)", fname, secs, size / 1048576.0 / secs));
+            setStage("Saved: " + fname);
+            log(String.format(Locale.US, "Saved %s (%.1f s, %.1f MB/s)", fname, secs, size / 1048576.0 / secs));
             saved(t.uri, fname);
             return true;
         }

@@ -4,11 +4,14 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -19,6 +22,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.DocumentsContract;
 import android.text.InputType;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -26,6 +30,8 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -39,7 +45,7 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * JS Tether v3 (JS Live Photo): Log masuk -> senarai EVENTS -> tether live.
+ * JS Tether v3 (JS Live Photo): Sign in -> event list -> live tether.
  * The camera work and uploads run in TetherService so they continue in the background.
  */
 public class MainActivity extends Activity implements TetherService.Listener {
@@ -129,7 +135,7 @@ public class MainActivity extends Activity implements TetherService.Listener {
             saveShoot((JSONObject) r);
             TetherService s = TetherService.get();
             if (s != null) s.apiChanged();
-            if (announce) toast("Log masuk berjaya");
+            if (announce) toast("Signed in");
             showLive();
         }});
     }
@@ -137,9 +143,13 @@ public class MainActivity extends Activity implements TetherService.Listener {
     private void saveShoot(JSONObject r) {
         JSONObject ev = r.optJSONObject("event");
         if (ev == null) ev = new JSONObject();
+        String guestUrl = r.optString("guestUrl", "");
+        if (guestUrl.isEmpty()) guestUrl = ev.optString("url", "");
         prefs.edit().putString("event_id", r.has("eventId") ? r.optString("eventId") : ev.optString("id"))
                 .putString("event_title", ev.optString("title")).putString("event_folder", ev.optString("title"))
-                .putString("event_url", ev.optString("url")).putLong("ends_at", ev.optLong("endsAt"))
+                .putString("event_url", ev.optString("url"))
+                .putString("guest_url", guestUrl).putString("guest_code", r.optString("guestCode", ""))
+                .putLong("ends_at", ev.optLong("endsAt"))
                 .putInt("slot", r.optInt("slot")).putString("photog_name", r.optString("name")).apply();
     }
 
@@ -162,6 +172,8 @@ public class MainActivity extends Activity implements TetherService.Listener {
         b.setText(s);
         b.setAllCaps(false);
         b.setTextColor(Color.WHITE);
+        b.setPadding(dp(10), dp(12), dp(10), dp(12));
+        b.setMinHeight(dp(48));
         GradientDrawable g = new GradientDrawable();
         g.setCornerRadius(dp(8));
         if (primary) g.setColor(TEAL); else { g.setColor(CARD); g.setStroke(dp(1), Color.rgb(70, 82, 87)); }
@@ -190,7 +202,7 @@ public class MainActivity extends Activity implements TetherService.Listener {
         LinearLayout r = new LinearLayout(this);
         r.setOrientation(LinearLayout.HORIZONTAL);
         for (int i = 0; i < views.length; i++) {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(48), 1f);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
             lp.setMargins(i == 0 ? 0 : dp(4), dp(4), i == views.length - 1 ? 0 : dp(4), dp(4));
             r.addView(views[i], lp);
         }
@@ -226,11 +238,11 @@ public class MainActivity extends Activity implements TetherService.Listener {
                 runOnUiThread(new Runnable() { @Override public void run() { done.ok(r); } });
             } catch (final LiveApi.ApiException e) {
                 runOnUiThread(new Runnable() { @Override public void run() {
-                    if (e.status == 401) { prefs.edit().remove("token").apply(); showLogin("Kod tamat atau event ditutup. Masukkan kod photographer baru."); }
+                    if (e.status == 401) { prefs.edit().remove("token").apply(); showLogin("Code expired or event closed. Enter a new photographer code."); }
                     else toast(e.getMessage());
                 }});
             } catch (final Exception e) {
-                toast("Ralat: " + e.getMessage());
+                toast("Error: " + e.getMessage());
             }
         }}).start();
     }
@@ -239,41 +251,44 @@ public class MainActivity extends Activity implements TetherService.Listener {
 
     private void showLogin(String message) {
         screen = "login";
-        LinearLayout root = page("Log masuk jurugambar", "Masukkan kod photographer 6 digit dari admin, dan nama awak.");
+        LinearLayout root = page("Photographer sign in", "Enter the 6-digit photographer code from your admin, and your name.");
         space(root, 12);
         if (message != null) root.addView(text(message, 14, AMBER, true));
-        root.addView(text("Kod photographer", 13, MUTED, false));
+        root.addView(text("Photographer code", 13, MUTED, false));
         final EditText code = new EditText(this);
         code.setInputType(InputType.TYPE_CLASS_NUMBER);
         code.setTextSize(30);
         code.setLetterSpacing(0.3f);
         code.setTextColor(Color.WHITE);
         code.setHint("123456");
+        code.setText(prefs.getString("last_code", ""));
         code.setFilters(new android.text.InputFilter[]{ new android.text.InputFilter.LengthFilter(6) });
         root.addView(code);
-        root.addView(text("Nama (cth Aiman)", 13, MUTED, false));
+        root.addView(text("Name (e.g. Aiman)", 13, MUTED, false));
         final EditText name = new EditText(this);
         name.setSingleLine(true);
         name.setTextColor(Color.WHITE);
-        name.setText(prefs.getString("photog_name", ""));
+        name.setText(prefs.getString("last_name", prefs.getString("photog_name", "")));
         root.addView(name);
         space(root, 12);
         final TextView err = text("", 14, RED, false);
-        root.addView(button("Masuk", true, new View.OnClickListener() { @Override public void onClick(View v) {
+        root.addView(button("Sign in", true, new View.OnClickListener() { @Override public void onClick(View v) {
             final String c = code.getText().toString().trim(), n = name.getText().toString().trim();
-            if (c.length() != 6) { err.setText("Masukkan 6 digit kod."); return; }
-            if (n.isEmpty()) { err.setText("Taip nama awak."); return; }
+            if (c.length() != 6) { err.setText("Enter the 6-digit code."); return; }
+            if (n.isEmpty()) { err.setText("Type your name."); return; }
             final LiveApi api = new LiveApi(App.serverUrl(MainActivity.this), App.fastUrl(MainActivity.this), null);
-            err.setText("Menyemak…");
+            err.setText("Checking…");
             new Thread(new Runnable() { @Override public void run() {
                 try {
                     final JSONObject r = api.loginCode(c, n);
                     runOnUiThread(new Runnable() { @Override public void run() {
-                        prefs.edit().putString("token", r.optString("token")).putString("photog_name", n).apply();
+                        prefs.edit().putString("token", r.optString("token")).putString("photog_name", n)
+                                .putString("last_code", c).putString("last_name", n).apply();
+                        addServerHistory(App.serverUrl(MainActivity.this));
                         saveShoot(r);
                         TetherService s = TetherService.get();
                         if (s != null) s.apiChanged();
-                        toast("Masuk sebagai Photographer " + r.optInt("slot"));
+                        toast("Signed in as Photographer " + r.optInt("slot"));
                         showLive();
                         if (TetherService.get() == null) findCamera();
                     }});
@@ -281,13 +296,33 @@ public class MainActivity extends Activity implements TetherService.Listener {
                     runOnUiThread(new Runnable() { @Override public void run() { err.setText(e.getMessage()); } });
                 }
             }}).start();
-        }}), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
+        }}), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(err);
-        root.addView(text("Mana nak dapat kod? Dari admin JohorStudio.com atau penganjur. Kod photographer berbeza dengan kod tetamu di skrin.", 13, MUTED, false));
+        root.addView(text("Where do you get the code? From the JohorStudio.com admin or the organiser. The photographer code differs from the guest code on screen.", 13, MUTED, false));
         space(root, 8);
-        root.addView(button("Tetapan server", false, new View.OnClickListener() { @Override public void onClick(View v) { serverSettings(); } }),
-                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
+        root.addView(button("Server settings", false, new View.OnClickListener() { @Override public void onClick(View v) { serverSettings(); } }),
+                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(text("Server: " + App.serverUrl(this), 12, MUTED, false));
+        java.util.List<String> servers = displayServers();
+        if (!servers.isEmpty()) {
+            space(root, 4);
+            root.addView(text("Previous servers", 12, MUTED, true));
+            for (final String s : servers) {
+                TextView rowTv = new TextView(this);
+                rowTv.setText(s);
+                rowTv.setTextSize(12);
+                rowTv.setTextColor(TEAL_LIGHT);
+                rowTv.setPadding(0, dp(6), 0, dp(6));
+                rowTv.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) {
+                    prefs.edit().putString("server_url", s).apply();
+                    TetherService t = TetherService.get();
+                    if (t != null) t.apiChanged();
+                    toast("Server set");
+                    showLogin(null);
+                }});
+                root.addView(rowTv);
+            }
+        }
         setContentView(root);
         code.requestFocus();
     }
@@ -295,45 +330,170 @@ public class MainActivity extends Activity implements TetherService.Listener {
     private void serverSettings() {
         LinearLayout f = column();
         f.setPadding(dp(20), dp(8), dp(20), 0);
-        f.addView(text("Alamat awam", 12, Color.GRAY, false));
+        f.addView(text("Public address", 12, Color.GRAY, false));
         final EditText eUrl = new EditText(this);
         eUrl.setSingleLine(true);
         eUrl.setText(App.serverUrl(this));
         f.addView(eUrl);
-        f.addView(text("Alamat Tailscale (admin sahaja, cuba dulu; kosongkan jika tiada)", 12, Color.GRAY, false));
+        f.addView(text("Tailscale address (admin only, try first; leave empty if none)", 12, Color.GRAY, false));
         final EditText eFast = new EditText(this);
         eFast.setSingleLine(true);
         eFast.setHint("http://m10:8095");
         eFast.setText(App.fastUrl(this));
         f.addView(eFast);
-        new AlertDialog.Builder(this).setTitle("Tetapan server").setView(f)
-                .setPositiveButton("Simpan", new DialogInterface.OnClickListener() { @Override public void onClick(DialogInterface d, int w) {
+        new AlertDialog.Builder(this).setTitle("Server settings").setView(f)
+                .setPositiveButton("Save", new DialogInterface.OnClickListener() { @Override public void onClick(DialogInterface d, int w) {
                     String u = eUrl.getText().toString().trim();
-                    prefs.edit().putString("server_url", u.isEmpty() ? LiveApi.DEFAULT_URL : u)
+                    String saved = u.isEmpty() ? LiveApi.DEFAULT_URL : u;
+                    prefs.edit().putString("server_url", saved)
                             .putString("fast_url", eFast.getText().toString().trim()).apply();
+                    addServerHistory(saved);
                     TetherService s = TetherService.get();
                     if (s != null) s.apiChanged();
                     if ("login".equals(screen)) showLogin(null);
                 }})
-                .setNegativeButton("Batal", null).show();
+                .setNegativeButton("Cancel", null).show();
+    }
+
+    // ------------------------------------------------------------------ server history
+
+    private java.util.List<String> serverHistory() {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        String raw = prefs.getString("server_history", null);
+        if (raw == null) return out;
+        try {
+            JSONArray a = new JSONArray(raw);
+            for (int i = 0; i < a.length(); i++) {
+                String s = a.optString(i);
+                if (s != null && !s.isEmpty() && !out.contains(s)) out.add(s);
+            }
+        } catch (Exception ignored) {}
+        return out;
+    }
+
+    private void addServerHistory(String url) {
+        if (url == null) return;
+        String u = url.trim();
+        if (u.isEmpty()) return;
+        java.util.List<String> list = serverHistory();
+        list.remove(u);
+        list.add(0, u);
+        while (list.size() > 8) list.remove(list.size() - 1);
+        JSONArray a = new JSONArray();
+        for (String s : list) a.put(s);
+        prefs.edit().putString("server_history", a.toString()).apply();
+    }
+
+    private java.util.List<String> displayServers() {
+        java.util.List<String> list = serverHistory();
+        String cur = App.serverUrl(this);
+        if (!list.contains(cur)) list.add(0, cur);
+        return list;
     }
 
     private void logout() {
-        new AlertDialog.Builder(this).setMessage("Log keluar? Gambar dalam giliran akan dihantar bila awak masuk semula dengan kod baru untuk event yang sama.")
-                .setPositiveButton("Log keluar", new DialogInterface.OnClickListener() { @Override public void onClick(DialogInterface d, int w) {
+        new AlertDialog.Builder(this)
+                .setMessage("Log out? Queued photos will be sent when you sign in again for the same event.")
+                .setPositiveButton("Log out", new DialogInterface.OnClickListener() { @Override public void onClick(DialogInterface d, int w) {
                     final LiveApi api = App.api(MainActivity.this);
                     if (api != null) new Thread(new Runnable() { @Override public void run() { api.logout(); } }).start();
                     prefs.edit().remove("token").apply();
                     TetherService s = TetherService.get();
                     if (s != null) s.apiChanged();
                     showLogin(null);
-                }}).setNegativeButton("Batal", null).show();
+                }}).setNegativeButton("Cancel", null).show();
+    }
+
+    private String guestLink() {
+        String g = prefs.getString("guest_url", null);
+        if (g == null || g.isEmpty()) g = prefs.getString("event_url", "");
+        return g;
     }
 
     private void share() {
-        Intent s = new Intent(Intent.ACTION_SEND).setType("text/plain")
-                .putExtra(Intent.EXTRA_TEXT, prefs.getString("event_title", "") + "\nGaleri live: " + prefs.getString("event_url", ""));
-        startActivity(Intent.createChooser(s, "Kongsi pautan galeri"));
+        final LiveApi api = App.api(this);
+        if (api == null) { showLogin(null); return; }
+        new Thread(new Runnable() { @Override public void run() {
+            try { final JSONObject r = api.shoot(); runOnUiThread(new Runnable() { @Override public void run() { saveShoot(r); showShareDialog(); } }); }
+            catch (Exception e) { runOnUiThread(new Runnable() { @Override public void run() { showShareDialog(); } }); }
+        }}).start();
+    }
+
+    private LinearLayout.LayoutParams fullBtn() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, dp(4), 0, 0);
+        return lp;
+    }
+
+    private void showShareDialog() {
+        final String link = guestLink();
+        final AlertDialog d = new AlertDialog.Builder(this)
+                .setTitle(prefs.getString("event_title", "Event"))
+                .create();
+        LinearLayout content = column();
+        content.setPadding(dp(10), dp(6), dp(10), dp(6));
+
+        final ImageView qr = new ImageView(this);
+        qr.setImageBitmap(QrCode.toBitmap(link, dp(220)));
+        qr.setBackgroundColor(Color.WHITE);
+        qr.setPadding(dp(6), dp(6), dp(6), dp(6));
+        LinearLayout.LayoutParams qp = new LinearLayout.LayoutParams(dp(232), dp(232));
+        qp.gravity = Gravity.CENTER_HORIZONTAL;
+        content.addView(qr, qp);
+        qr.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { showQrFullscreen(link); } });
+
+        TextView cap = text("Tap QR to enlarge", 12, Color.GRAY, false);
+        cap.setGravity(Gravity.CENTER_HORIZONTAL);
+        content.addView(cap);
+
+        TextView linkText = new TextView(this);
+        linkText.setText(link);
+        linkText.setTextSize(14);
+        linkText.setTextColor(TEAL);
+        linkText.setTextIsSelectable(true);
+        linkText.setPadding(0, dp(8), 0, dp(8));
+        content.addView(linkText);
+
+        content.addView(button("Copy to clipboard", true, new View.OnClickListener() { @Override public void onClick(View v) {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            cm.setPrimaryClip(ClipData.newPlainText("Guest link", link));
+            toast("Link copied");
+        }}), fullBtn());
+
+        content.addView(button("Open in browser", false, new View.OnClickListener() { @Override public void onClick(View v) {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(link)));
+        }}), fullBtn());
+
+        content.addView(button("Share...", false, new View.OnClickListener() { @Override public void onClick(View v) {
+            Intent s = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, link);
+            startActivity(Intent.createChooser(s, "Share guest link"));
+        }}), fullBtn());
+
+        content.addView(button("Close", false, new View.OnClickListener() { @Override public void onClick(View v) { d.dismiss(); } }), fullBtn());
+
+        d.setView(content);
+        d.show();
+    }
+
+    private void showQrFullscreen(final String link) {
+        final int size = getResources().getDisplayMetrics().widthPixels - dp(24);
+        final android.app.Dialog d = new android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        FrameLayout frame = new FrameLayout(this);
+        frame.setBackgroundColor(Color.WHITE);
+        ImageView img = new ImageView(this);
+        img.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        img.setImageBitmap(QrCode.toBitmap(link, size));
+        frame.addView(img, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
+        TextView hint = new TextView(this);
+        hint.setText("Tap anywhere to close");
+        hint.setTextSize(15);
+        hint.setTextColor(Color.DKGRAY);
+        FrameLayout.LayoutParams hp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        hp.setMargins(0, 0, 0, dp(40));
+        frame.addView(hint, hp);
+        frame.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { d.dismiss(); } });
+        d.setContentView(frame, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        d.show();
     }
 
     // ------------------------------------------------------------------ live tether
@@ -342,41 +502,45 @@ public class MainActivity extends Activity implements TetherService.Listener {
         screen = "live";
         long ends = prefs.getLong("ends_at", 0);
         String sub = "Photographer " + prefs.getInt("slot", 0) + " · " + prefs.getString("photog_name", "")
-                + (ends > 0 ? " · live hingga " + new SimpleDateFormat("HH:mm", Locale.US).format(new Date(ends)) : "");
-        LinearLayout root = page(prefs.getString("event_title", "Tiada event"), sub);
+                + (ends > 0 ? " · live until " + new SimpleDateFormat("HH:mm", Locale.US).format(new Date(ends)) : "");
+        LinearLayout root = page(prefs.getString("event_title", "No event"), sub);
 
         LinearLayout st = card();
-        tvCamera = text("Kamera: -", 16, RED, true);
+        tvCamera = text("Camera: -", 16, RED, true);
         tvServer = text("Server: -", 14, AMBER, false);
         tvStage = text("-", 14, Color.WHITE, false);
-        tvCounts = text("Disimpan 0 · WebP/Upload giliran 0 · Dihantar 0", 14, Color.WHITE, true);
+        tvCounts = text("Saved 0 · Queue 0 · Sent 0", 14, Color.WHITE, true);
         st.addView(tvCamera); st.addView(tvServer); st.addView(tvStage); st.addView(tvCounts);
         root.addView(st);
 
         final Button quality = button("Format: " + App.qualityLabel(prefs.getInt("quality", 50)), false, null);
         quality.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { chooseQuality(quality); } });
         root.addView(row(quality,
-                button("Kongsi galeri", false, new View.OnClickListener() { @Override public void onClick(View v) { share(); } }),
-                button("Log keluar", false, new View.OnClickListener() { @Override public void onClick(View v) { logout(); } })));
+                button("Share gallery", false, new View.OnClickListener() { @Override public void onClick(View v) { share(); } }),
+                button("Log out", false, new View.OnClickListener() { @Override public void onClick(View v) { logout(); } })));
         root.addView(row(
-                button("Sambung semula kamera", false, new View.OnClickListener() { @Override public void onClick(View v) {
+                button("Reconnect camera", false, new View.OnClickListener() { @Override public void onClick(View v) {
                     if (delayedMode()) { openDelayed(); return; }
                     TetherService s = TetherService.get();
                     if (s == null) findCamera(); else s.reconnect();
                 }}),
-                button("Cuba hantar sekarang", false, new View.OnClickListener() { @Override public void onClick(View v) {
+                button("Send now", false, new View.OnClickListener() { @Override public void onClick(View v) {
                     TetherService s = TetherService.get();
                     if (s != null) s.retryNow();
                 }})));
 
         root.addView(row(modeButton()));
         root.addView(row(
-                button("Upload gambar dari telefon", true, new View.OnClickListener() { @Override public void onClick(View v) { pickPhotos(); } }),
-                button("Senarai upload", false, new View.OnClickListener() { @Override public void onClick(View v) { showUploads(); } })));
+                button("Upload from phone", true, new View.OnClickListener() { @Override public void onClick(View v) { pickPhotos(); } }),
+                button("Upload queue", false, new View.OnClickListener() { @Override public void onClick(View v) { showUploads(); } })));
+        root.addView(row(
+                button("Uploaded photos", false, new View.OnClickListener() { @Override public void onClick(View v) {
+                    startActivity(new Intent(MainActivity.this, PhotosActivity.class));
+                }})));
 
-        root.addView(toggle("Hantar ke server", "upload_on", true));
-        root.addView(toggle("Skrin sentiasa ON", "keep_screen", true));
-        root.addView(toggle("Kecerahan minimum (bila app dibuka)", "dim", false));
+        root.addView(toggle("Send to server", "upload_on", true));
+        root.addView(toggle("Screen always on", "keep_screen", true));
+        root.addView(toggle("Minimum brightness (while app is open)", "dim", false));
 
         tvFolder = text(folderLabel(), 12, MUTED, false);
         tvFolder.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { pickFolder(); } });
@@ -396,9 +560,9 @@ public class MainActivity extends Activity implements TetherService.Listener {
         if (TetherService.get() == null && !delayedMode()) findCamera();
         onChanged();
         if (delayedMode() && TetherService.get() == null) {
-            tvCamera.setText("Mod: Delayed (tarik dari SD)");
+            tvCamera.setText("Mode: Delayed (pull from SD)");
             tvCamera.setTextColor(AMBER);
-            tvStage.setText("⚠ Set kamera: MENU > Setup > USB Connection > Mass Storage, kemudian cucuk USB");
+            tvStage.setText("⚠ Set camera: MENU > Setup > USB Connection > Mass Storage, then plug in USB");
         }
         TetherService s = TetherService.get();
         if (s != null) {
@@ -427,10 +591,10 @@ public class MainActivity extends Activity implements TetherService.Listener {
         final String[] labels = new String[App.QUALITIES.length];
         int cur = prefs.getInt("quality", 50), sel = 1;
         for (int i = 0; i < labels.length; i++) {
-            labels[i] = App.qualityLabel(App.QUALITIES[i]) + (App.QUALITIES[i] == 50 ? " (default)" : App.QUALITIES[i] == 0 ? " (fail asal, besar)" : "");
+            labels[i] = App.qualityLabel(App.QUALITIES[i]) + (App.QUALITIES[i] == 50 ? " (default)" : App.QUALITIES[i] == 0 ? " (original file, large)" : "");
             if (App.QUALITIES[i] == cur) sel = i;
         }
-        new AlertDialog.Builder(this).setTitle("Format hantar ke server")
+        new AlertDialog.Builder(this).setTitle("Upload format")
                 .setSingleChoiceItems(labels, sel, new DialogInterface.OnClickListener() { @Override public void onClick(DialogInterface d, int w) {
                     prefs.edit().putInt("quality", App.QUALITIES[w]).apply();
                     b.setText("Format: " + App.qualityLabel(App.QUALITIES[w]));
@@ -452,23 +616,23 @@ public class MainActivity extends Activity implements TetherService.Listener {
         if (!"live".equals(screen) || tvCamera == null) return;
         TetherService s = TetherService.get();
         if (delayedMode() && s == null) {
-            tvCamera.setText("Mod: Delayed (tarik dari SD)");
+            tvCamera.setText("Mode: Delayed (pull from SD)");
             tvCamera.setTextColor(AMBER);
-            tvStage.setText("⚠ Set kamera: MENU > Setup > USB Connection > Mass Storage, kemudian cucuk USB");
+            tvStage.setText("⚠ Set camera: MENU > Setup > USB Connection > Mass Storage, then plug in USB");
             return;
         }
         if (s == null) {
-            tvCamera.setText("Kamera: tidak bersambung");
+            tvCamera.setText("Camera: not connected");
             tvCamera.setTextColor(RED);
-            tvStage.setText("Sambungkan kamera (USB Connection: PC Remote)");
+            tvStage.setText("Connect the camera (USB Connection: PC Remote)");
             return;
         }
-        tvCamera.setText("Kamera: " + s.camera);
+        tvCamera.setText("Camera: " + s.camera);
         tvCamera.setTextColor(s.cameraOk ? GREEN : RED);
         tvServer.setText("Server: " + s.server);
         tvServer.setTextColor(s.serverOk ? GREEN : AMBER);
         tvStage.setText(s.stage);
-        tvCounts.setText("Disimpan " + s.saved + " · Giliran " + s.pending + " · Dihantar " + s.uploaded);
+        tvCounts.setText("Saved " + s.saved + " · Queue " + s.pending + " · Sent " + s.uploaded);
     }
 
     @Override public void onLog(String line) {
@@ -505,7 +669,7 @@ public class MainActivity extends Activity implements TetherService.Listener {
             try { getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
         }
         if (uris.isEmpty()) return;
-        toast(uris.size() + " gambar dipilih, semak dengan server…");
+        toast(uris.size() + " photos selected, checking with server…");
         TetherService s = TetherService.get();
         if (s != null) { s.addManual(uris); return; }
         // no camera yet: start the service for the upload queue, then hand the photos over
@@ -517,7 +681,7 @@ public class MainActivity extends Activity implements TetherService.Listener {
                 TetherService x = TetherService.get();
                 if (x != null) x.addManual(uris);
                 else if (++tries < 20) h.postDelayed(this, 250);
-                else toast("Tak dapat mula servis upload");
+                else toast("Couldn't start the upload service");
             }
         }, 250);
     }
@@ -525,12 +689,12 @@ public class MainActivity extends Activity implements TetherService.Listener {
     /** Which photos are sent, waiting or failed (kept across restarts). */
     private void showUploads() {
         TetherService s = TetherService.get();
-        if (s == null) { toast("Sambung kamera atau pilih gambar dulu"); return; }
+        if (s == null) { toast("Connect the camera or pick photos first"); return; }
         java.util.List<String[]> rows = s.uploadRows();
         LinearLayout list = column();
         list.setPadding(dp(18), dp(8), dp(18), dp(8));
         list.setBackgroundColor(Color.WHITE);
-        if (rows.isEmpty()) list.addView(text("Belum ada gambar dihantar.", 14, Color.GRAY, false));
+        if (rows.isEmpty()) list.addView(text("No photos sent yet.", 14, Color.GRAY, false));
         int n = 0;
         for (String[] r : rows) {
             if (++n > 300) break;
@@ -538,7 +702,9 @@ public class MainActivity extends Activity implements TetherService.Listener {
             line.setOrientation(LinearLayout.HORIZONTAL);
             TextView a = text(r[0], 14, Color.BLACK, false);
             a.setSingleLine(true); a.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
-            TextView b = text(r[1], 13, r[1].startsWith("Sudah") ? Color.rgb(46, 125, 79) : r[1].startsWith("Gagal") ? Color.rgb(163, 48, 42) : Color.rgb(102, 115, 122), false);
+            boolean sent = r[1].startsWith("Sent") || r[1].startsWith("Already");
+            boolean failed = r[1].startsWith("Failed");
+            TextView b = text(r[1], 13, sent ? Color.rgb(46, 125, 79) : failed ? Color.rgb(163, 48, 42) : Color.rgb(102, 115, 122), false);
             b.setPadding(dp(10), 0, 0, 0);
             line.addView(a, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             line.addView(b);
@@ -547,11 +713,11 @@ public class MainActivity extends Activity implements TetherService.Listener {
         }
         ScrollView sv = new ScrollView(this);
         sv.addView(list);
-        new AlertDialog.Builder(this).setTitle("Senarai upload").setView(sv)
-                .setPositiveButton("Cuba hantar sekarang", new DialogInterface.OnClickListener() { @Override public void onClick(DialogInterface d, int w) {
+        new AlertDialog.Builder(this).setTitle("Upload queue").setView(sv)
+                .setPositiveButton("Send now", new DialogInterface.OnClickListener() { @Override public void onClick(DialogInterface d, int w) {
                     TetherService x = TetherService.get(); if (x != null) x.retryNow();
                 }})
-                .setNegativeButton("Tutup", null).show();
+                .setNegativeButton("Close", null).show();
     }
 
     // ------------------------------------------------------------------ phone folder
@@ -564,11 +730,11 @@ public class MainActivity extends Activity implements TetherService.Listener {
 
     private String folderLabel() {
         String s = prefs.getString("tree", null);
-        if (s == null) return "Folder telefon: Pictures/JS Tether/<event> (default) · ketik untuk tukar";
+        if (s == null) return "Phone folder: Pictures/JS Tether/<event> (default) · tap to change";
         try {
             String id = DocumentsContract.getTreeDocumentId(Uri.parse(s));
-            return "Folder telefon: " + (id.startsWith("primary:") ? "Storan dalaman/" + id.substring(8) : id.replace(':', '/')) + " · ketik untuk tukar";
-        } catch (Exception e) { return "Folder telefon: " + s; }
+            return "Phone folder: " + (id.startsWith("primary:") ? "Internal storage/" + id.substring(8) : id.replace(':', '/')) + " · tap to change";
+        } catch (Exception e) { return "Phone folder: " + s; }
     }
 
     @Override protected void onActivityResult(int req, int res, Intent data) {
@@ -578,7 +744,7 @@ public class MainActivity extends Activity implements TetherService.Listener {
             Uri tree = data.getData();
             try {
                 getContentResolver().takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-            } catch (Exception e) { toast("Gagal simpan kebenaran folder: " + e.getMessage()); }
+            } catch (Exception e) { toast("Failed to save folder permission: " + e.getMessage()); }
             prefs.edit().putString("tree", tree.toString()).apply();
             if (tvFolder != null) tvFolder.setText(folderLabel());
         }
@@ -605,13 +771,13 @@ public class MainActivity extends Activity implements TetherService.Listener {
     private String modeLabel() { return delayedMode() ? "Delayed" : "Direct"; }
 
     private Button modeButton() {
-        final Button b = button("Mod: " + modeLabel(), false, null);
+        final Button b = button("Mode: " + modeLabel(), false, null);
         b.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) {
             final boolean delayed = !delayedMode();
             prefs.edit().putString("mode", delayed ? "delayed" : "direct").apply();
-            b.setText("Mod: " + modeLabel());
-            toast(delayed ? "Mod Delayed: set kamera MENU > Setup > USB Connection > Mass Storage"
-                           : "Mod Direct: tether langsung (PC Remote)");
+            b.setText("Mode: " + modeLabel());
+            toast(delayed ? "Delayed mode: set camera MENU > Setup > USB Connection > Mass Storage"
+                           : "Direct mode: live tether (PC Remote)");
             if (delayed) {
                 if (TetherService.get() != null) {
                     startService(new Intent(MainActivity.this, TetherService.class).setAction(TetherService.ACTION_STOP));
@@ -635,7 +801,7 @@ public class MainActivity extends Activity implements TetherService.Listener {
             if (ACTION_USB_PERMISSION.equals(a)) {
                 if (d != null && i.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
                     if (!delayedMode()) TetherService.start(MainActivity.this, d);
-                } else toast("Kebenaran USB ditolak");
+                } else toast("USB permission denied");
             } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(a)) {
                 TetherService s = TetherService.get();
                 if (s != null) s.detached(d);

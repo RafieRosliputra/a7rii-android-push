@@ -83,7 +83,7 @@ public class PhotoEncoder {
         return out.toByteArray();
     }
 
-    /** Thumbnails only (for "JPG penuh" mode or when WebP failed): cheap subsampled decode. */
+    /** Thumbnails only (for "Full JPG" mode or when WebP failed): cheap subsampled decode. */
     public void thumbs(Uri uri, Result r) throws IOException {
         BitmapFactory.Options o = new BitmapFactory.Options();
         o.inJustDecodeBounds = true;
@@ -97,7 +97,7 @@ public class PhotoEncoder {
         in = cr.openInputStream(uri);
         Bitmap b = BitmapFactory.decodeStream(in, null, d);
         close(in);
-        if (b == null) throw new IOException("Gambar tidak dapat dibaca");
+        if (b == null) throw new IOException("Photo cannot be read");
         b = applyOrientation(b, orientation(uri));
         makeThumbs(b, r);
         b.recycle();
@@ -121,11 +121,11 @@ public class PhotoEncoder {
             o.inPreferredConfig = Bitmap.Config.ARGB_8888;
             InputStream in = cr.openInputStream(uri);
             try { b = BitmapFactory.decodeStream(in, null, o); } finally { close(in); }
-            if (b == null) throw new IOException("Gambar tidak dapat dibaca (bukan JPEG?)");
+            if (b == null) throw new IOException("Photo cannot be read (not a JPEG?)");
             b = applyOrientation(b, orientation(uri));
             OutputStream os = new FileOutputStream(outFile);
             try {
-                if (!b.compress(webp(), quality, os)) throw new IOException("WebP gagal");
+                if (!b.compress(webp(), quality, os)) throw new IOException("WebP failed");
             } finally { os.close(); }
             makeThumbs(b, r);
             r.file = outFile;

@@ -102,9 +102,9 @@ public class UploadQueue extends Thread {
     /** Queue a photo. With a key (name|size|time taken), photos already queued or sent are skipped. Returns false when skipped. */
     public synchronized boolean add(Uri uri, String name, String eventId, int quality, String key) {
         if (key != null) {
-            for (Job x : jobs) if (key.equals(x.key)) { listener.onLog("Sudah dalam giliran: " + name); return false; }
+            for (Job x : jobs) if (key.equals(x.key)) { listener.onLog("Already queued: " + name); return false; }
             String st = stateOf(key);
-            if ("ok".equals(st) || "dup".equals(st)) { listener.onLog("Sudah dihantar sebelum ini: " + name); return false; }
+            if ("ok".equals(st) || "dup".equals(st)) { listener.onLog("Already sent before: " + name); return false; }
         }
         Job j = new Job();
         j.id = Long.toString(System.currentTimeMillis(), 36) + Integer.toString((int) (Math.random() * 1296), 36);
@@ -149,19 +149,19 @@ public class UploadQueue extends Thread {
         } catch (Exception ignored) {}
     }
 
-    /** Rows for the "Senarai upload" screen, newest first: {name, status text}. */
+    /** Rows for the "Upload list" screen, newest first: {name, status text}. */
     public synchronized List<String[]> rows() {
         List<String[]> out = new ArrayList<>();
         for (int i = jobs.size() - 1; i >= 0; i--) {
             Job j = jobs.get(i);
-            out.add(new String[] { j.name, i == 0 ? (j.attempts > 0 ? "Cuba semula (" + j.attempts + ")" : "Sedang dihantar") : "Menunggu" });
+            out.add(new String[] { j.name, i == 0 ? (j.attempts > 0 ? "Retry (" + j.attempts + ")" : "Sending") : "Waiting" });
         }
         java.text.SimpleDateFormat f = new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US);
         for (int i = history.length() - 1; i >= 0; i--) {
             JSONObject o = history.optJSONObject(i);
             if (o == null) continue;
             String st = o.optString("state");
-            out.add(new String[] { o.optString("name"), ("ok".equals(st) ? "Sudah ✓" : "dup".equals(st) ? "Dah ada di galeri" : "Gagal") + " · " + f.format(new java.util.Date(o.optLong("at"))) });
+            out.add(new String[] { o.optString("name"), ("ok".equals(st) ? "Sent ✓" : "dup".equals(st) ? "Already in gallery" : "Failed") + " · " + f.format(new java.util.Date(o.optLong("at"))) });
         }
         return out;
     }
@@ -200,7 +200,7 @@ public class UploadQueue extends Thread {
             JSONArray a = new JSONArray(new String(b, "UTF-8"));
             for (int i = 0; i < a.length(); i++) jobs.add(Job.of(a.getJSONObject(i)));
         } catch (Exception e) {
-            listener.onLog("Giliran lama tidak dapat dibaca: " + e.getMessage());
+            listener.onLog("Could not read old queue: " + e.getMessage());
         }
         try {
             if (logFile.exists()) {
@@ -222,7 +222,7 @@ public class UploadQueue extends Thread {
             out.close();
             if (!tmp.renameTo(store)) throw new IOException("rename");
         } catch (Exception e) {
-            listener.onLog("Gagal simpan giliran: " + e.getMessage());
+            listener.onLog("Failed to save queue: " + e.getMessage());
         }
     }
 
@@ -257,41 +257,41 @@ public class UploadQueue extends Thread {
                 final String doneName = j.name, doneKey = j.key;
                 finish(j);
                 backoff = 3000;
-                listener.onServer("bersambung ✓ " + hostOf(a.via()), true);
-                listener.onLog(dup ? "Dah ada di galeri, tak dihantar lagi: " + j.name : "Server ✓ " + j.name);
+                listener.onServer("connected ✓ " + hostOf(a.via()), true);
+                listener.onLog(dup ? "Already in gallery, not sent again: " + j.name : "Server ✓ " + j.name);
                 listener.onQueue(pending(), uploaded);
-                listener.onStage("Siap: " + j.name);
+                listener.onStage("Done: " + j.name);
                 Success sc = success;
                 if (sc != null) sc.onSuccess(doneName, doneKey);
             } catch (LiveApi.ApiException e) {
                 if (e.retryable()) {
                     j.attempts++;
                     save();
-                    listener.onServer(e.status == 0 ? "tiada rangkaian, cuba semula…" : e.status == 503 ? "storan server offline, cuba semula…"
-                            : e.status == 401 ? "kod tamat / event ditutup: masukkan kod baru" : "ralat " + e.status + ", cuba semula…", false);
-                    listener.onLog("Upload " + j.name + ": " + e.getMessage() + " (cuba semula " + (backoff / 1000) + " s)");
+                    listener.onServer(e.status == 0 ? "no network, retrying…" : e.status == 503 ? "server storage offline, retrying…"
+                            : e.status == 401 ? "code expired / event closed: enter a new code" : "error " + e.status + ", retrying…", false);
+                    listener.onLog("Upload " + j.name + ": " + e.getMessage() + " (retry in " + (backoff / 1000) + " s)");
                     sleepWait(backoff);
                     backoff = Math.min(backoff * 2, 60000);
                 } else if (e.status == 404 && e.getMessage() != null && e.getMessage().contains("Upload")) {
                     j.uploadId = null;      // server forgot the upload (expired): start it again
                     save();
                 } else {
-                    listener.onLog("Upload " + j.name + " ditolak: " + e.getMessage() + " (gambar kekal dalam telefon)");
+                    listener.onLog("Upload " + j.name + " rejected: " + e.getMessage() + " (photo stays on the phone)");
                     record(j.name, j.key, "bad");
-                    listener.onServer("ralat: " + e.getMessage(), false);
+                    listener.onServer("error: " + e.getMessage(), false);
                     finish(j);
                     listener.onQueue(pending(), uploaded);
                 }
             } catch (OutOfMemoryError oom) {
                 j.quality = QUALITY_JPG;
                 save();
-                listener.onLog("Memori tidak cukup untuk WebP, hantar JPG asal: " + j.name);
+                listener.onLog("Not enough memory for WebP, sending the original JPG: " + j.name);
             } catch (Exception e) {
                 j.attempts++;
                 save();
                 listener.onLog("Upload " + j.name + ": " + e.getMessage());
                 if (e instanceof java.io.FileNotFoundException && (j.attempts >= 8 || "file".equals(Uri.parse(j.uri).getScheme()))) { // our own cache copy is gone: no point retrying, and it must not block the queue head
-                    listener.onLog("Fail tiada dalam telefon lagi, dibuang dari giliran: " + j.name);
+                    listener.onLog("File no longer on the phone, removed from the queue: " + j.name);
                     record(j.name, j.key, "bad");
                     finish(j);
                     listener.onQueue(pending(), uploaded);
@@ -324,9 +324,9 @@ public class UploadQueue extends Thread {
                 enc.thumbs(uri, r);
                 r.usedOriginal = true;
             } else {
-                listener.onStage("Tukar ke WebP " + j.quality + "%: " + j.name + "…");
+                listener.onStage("Converting to WebP " + j.quality + "%: " + j.name + "…");
                 r = enc.toWebp(uri, j.quality, new File(work, j.id + ".webp"));
-                if (r.usedOriginal) listener.onLog("Memori tidak cukup untuk WebP, hantar JPG asal: " + j.name);
+                if (r.usedOriginal) listener.onLog("Not enough memory for WebP, sending the original JPG: " + j.name);
                 else listener.onLog(String.format(java.util.Locale.US, "WebP %d%%: %s (%.1f MB, %.1f s)", j.quality, j.name,
                         r.file.length() / 1048576.0, (System.currentTimeMillis() - t0) / 1000.0));
             }
@@ -360,7 +360,7 @@ public class UploadQueue extends Thread {
             skipFully(in, offset);
             while (offset < size) {
                 int len = readFully(in, buf);
-                if (len <= 0) throw new IOException("Fail lebih pendek daripada dijangka");
+                if (len <= 0) throw new IOException("File shorter than expected");
                 listener.onStage(String.format(java.util.Locale.US, "Upload %s %d%%", sendName, (int) (offset * 100 / size)));
                 long got = a.putChunk(j.uploadId, offset, buf, len);
                 if (got != offset + len) { // server has a different amount: realign
