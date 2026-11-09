@@ -43,6 +43,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".DelayedActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
         <service
             android:name=".TetherService"
             android:exported="false"

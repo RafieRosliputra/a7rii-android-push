@@ -30,8 +30,13 @@ public class UploadQueue extends Thread {
         void onLog(String s);
     }
 
+    /** Optional per-job success hook (Delayed tether). Direct mode never sets it. */
+    public interface Success {
+        void onSuccess(String name, String ref);
+    }
+
     static class Job {
-        String id, uri, name, eventId, uploadId, file, t480, t1600;
+        String id, uri, name, eventId, uploadId, file, t480, t1600, ref;
         int quality, attempts;
         boolean original;
 
@@ -43,6 +48,7 @@ public class UploadQueue extends Thread {
             if (file != null) o.put("file", file);
             if (t480 != null) o.put("t480", t480);
             if (t1600 != null) o.put("t1600", t1600);
+            if (ref != null) o.put("ref", ref);
             return o;
         }
         static Job of(JSONObject o) {
@@ -54,6 +60,7 @@ public class UploadQueue extends Thread {
             j.file = o.has("file") ? o.optString("file") : null;
             j.t480 = o.has("t480") ? o.optString("t480") : null;
             j.t1600 = o.has("t1600") ? o.optString("t1600") : null;
+            j.ref = o.has("ref") ? o.optString("ref") : null;
             return j;
         }
     }
@@ -64,6 +71,7 @@ public class UploadQueue extends Thread {
     private final File store, work;
     private final List<Job> jobs = new ArrayList<>();
     private volatile LiveApi api;
+    private volatile Success success;
     private volatile boolean running = true;
     private int uploaded;
 
@@ -78,6 +86,7 @@ public class UploadQueue extends Thread {
     }
 
     public void setApi(LiveApi a) { api = a; synchronized (this) { notifyAll(); } }
+    public void setSuccessListener(Success s) { success = s; }
     public synchronized int pending() { return jobs.size(); }
     public int uploaded() { return uploaded; }
     public void shutdown() { running = false; interrupt(); }
@@ -85,9 +94,13 @@ public class UploadQueue extends Thread {
     public synchronized void kick() { notifyAll(); }
 
     public synchronized void add(Uri uri, String name, String eventId, int quality) {
+        add(uri, name, eventId, quality, null);
+    }
+
+    public synchronized void add(Uri uri, String name, String eventId, int quality, String ref) {
         Job j = new Job();
         j.id = Long.toString(System.currentTimeMillis(), 36) + Integer.toString((int) (Math.random() * 1296), 36);
-        j.uri = uri.toString(); j.name = name; j.eventId = eventId; j.quality = quality;
+        j.uri = uri.toString(); j.name = name; j.eventId = eventId; j.quality = quality; j.ref = ref;
         jobs.add(j);
         save();
         notifyAll();
@@ -161,12 +174,15 @@ public class UploadQueue extends Thread {
             try {
                 process(a, j);
                 uploaded++;
+                final String doneName = j.name, doneRef = j.ref;
                 finish(j);
                 backoff = 3000;
                 listener.onServer("bersambung ✓ " + hostOf(a.via()), true);
                 listener.onLog("Server ✓ " + j.name);
                 listener.onQueue(pending(), uploaded);
                 listener.onStage("Siap: " + j.name);
+                Success sc = success;
+                if (sc != null) sc.onSuccess(doneName, doneRef);
             } catch (LiveApi.ApiException e) {
                 if (e.retryable()) {
                     j.attempts++;

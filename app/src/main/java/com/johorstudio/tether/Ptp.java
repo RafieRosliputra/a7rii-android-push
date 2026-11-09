@@ -14,6 +14,8 @@ import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 /** Minimal PTP-over-USB (still image class) implementation on top of Android USB host API. */
 public class Ptp {
@@ -22,6 +24,10 @@ public class Ptp {
     public static final int OC_CloseSession = 0x1003;
     public static final int OC_GetObjectInfo = 0x1008;
     public static final int OC_GetObject = 0x1009;
+    public static final int OC_GetStorageIDs = 0x1004;
+    public static final int OC_GetObjectHandles = 0x1007;
+    public static final int OC_GetThumb = 0x100A;
+    public static final int OC_GetPartialObject = 0x101B;
     public static final int OC_Sony_SDIOConnect = 0x9201;
     public static final int OC_Sony_GetSDIOGetExtDeviceInfo = 0x9202;
     public static final int OC_Sony_GetAllDevicePropData = 0x9209;
@@ -57,8 +63,9 @@ public class Ptp {
     }
 
     public static class ObjectInfo {
-        public int storageId, format, size, parent;
+        public int storageId, format, size, parent, thumbSize;
         public String filename = "";
+        public String captureDate = "";
     }
 
     public interface Logger { void log(String s); }
@@ -348,9 +355,11 @@ public class Ptp {
         o.storageId = b.getInt(0);
         o.format = b.getShort(4) & 0xFFFF;
         o.size = b.getInt(8);
+        o.thumbSize = b.getInt(14);
         o.parent = b.getInt(38);
         b.position(52);
         o.filename = readString(b);
+        o.captureDate = readString(b);
         return o;
     }
 
@@ -435,6 +444,59 @@ public class Ptp {
 
     public Response getObject(int handle, OutputStream sink, Progress p) throws IOException {
         return transact(OC_GetObject, new int[]{handle}, null, sink, p);
+    }
+
+    /** List storage IDs (0x1004). */
+    public int[] getStorageIDs() throws IOException {
+        Response r = transact(OC_GetStorageIDs);
+        if (!r.ok() || r.data == null) throw new IOException(String.format("GetStorageIDs gagal 0x%04X", r.code));
+        return u32Array(r.data);
+    }
+
+    /** Object handles on one storage, all formats, root parent (0x1007). */
+    public int[] getObjectHandles(int storageId) throws IOException {
+        Response r = transact(OC_GetObjectHandles, storageId, 0, 0xFFFFFFFF);
+        if (!r.ok() || r.data == null) throw new IOException(String.format("GetObjectHandles gagal 0x%04X", r.code));
+        return u32Array(r.data);
+    }
+
+    /** Thumbnail bytes (0x100A); null when the camera has none / the op fails. */
+    public byte[] getThumb(int handle) throws IOException {
+        Response r = transact(OC_GetThumb, handle);
+        if (!r.ok() || r.data == null || r.data.length == 0) return null;
+        return r.data;
+    }
+
+    /** First `count` bytes of an object (0x101B), for the EXIF-thumbnail fallback. */
+    public void getPartialObject(int handle, int offset, int count, OutputStream sink, Progress p) throws IOException {
+        Response r = transact(OC_GetPartialObject, new int[]{handle, offset, count}, null, sink, p);
+        if (!r.ok()) throw new IOException(String.format("GetPartialObject gagal 0x%04X", r.code));
+    }
+
+    /** Browse helper: every object handle across every storage (all formats, root parent). */
+    public int[] listObjectHandles() throws IOException {
+        List<Integer> hs = new ArrayList<>();
+        for (int sid : getStorageIDs()) for (int h : getObjectHandles(sid)) hs.add(h);
+        int[] a = new int[hs.size()];
+        for (int i = 0; i < a.length; i++) a[i] = hs.get(i);
+        return a;
+    }
+
+    /** Browse helper: full ObjectInfo for every object (caller filters formats). */
+    public List<ObjectInfo> listObjects() throws IOException {
+        List<ObjectInfo> out = new ArrayList<>();
+        for (int h : listObjectHandles()) {
+            try { out.add(getObjectInfo(h)); } catch (IOException ignored) {}
+        }
+        return out;
+    }
+
+    private static int[] u32Array(byte[] data) {
+        int n = data.length / 4;
+        int[] a = new int[n];
+        ByteBuffer b = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
+        for (int i = 0; i < n; i++) a[i] = b.getInt();
+        return a;
     }
 
     static String str(byte[] b) { return new String(b, StandardCharsets.UTF_8); }

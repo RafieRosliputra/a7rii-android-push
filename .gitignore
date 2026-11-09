@@ -7,3 +7,4 @@ local.properties
 *.iml
 .live-upload-import.tgz
 .live-upload-git.tgz
+.ds-worker/
