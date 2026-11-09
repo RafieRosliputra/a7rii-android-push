@@ -141,7 +141,7 @@ public class PhotosActivity extends Activity {
         root.setBackgroundColor(BG);
         root.setPadding(dp(14), dp(20), dp(14), dp(10));
 
-        TextView brand = text("JOHORSTUDIO.COM · LIVE", 12, TEAL_LIGHT, true);
+        TextView brand = text("JOHORSTUDIO.COM · LIVE (v" + App.version(PhotosActivity.this) + ")", 12, TEAL_LIGHT, true);
         brand.setLetterSpacing(0.1f);
         root.addView(brand);
         root.addView(text("Uploaded photos", 22, Color.WHITE, true));

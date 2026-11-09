@@ -7,6 +7,9 @@ import android.content.SharedPreferences;
 public final class App {
     private App() {}
 
+    public static String version(Context c) {
+        try { return c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName; } catch (Exception e) { return "?"; }
+    }
     public static SharedPreferences prefs(Context c) { return c.getSharedPreferences("tether", Context.MODE_PRIVATE); }
 
     public static String token(Context c) { return prefs(c).getString("token", null); }

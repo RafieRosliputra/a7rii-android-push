@@ -213,7 +213,7 @@ public class MainActivity extends Activity implements TetherService.Listener {
         LinearLayout root = column();
         root.setBackgroundColor(BG);
         root.setPadding(dp(18), dp(28), dp(18), dp(14));
-        TextView brand = text("JOHORSTUDIO.COM · LIVE", 12, TEAL_LIGHT, true);
+        TextView brand = text("JOHORSTUDIO.COM · LIVE (v" + App.version(MainActivity.this) + ")", 12, TEAL_LIGHT, true);
         brand.setLetterSpacing(0.1f);
         root.addView(brand);
         root.addView(text(title, 24, Color.WHITE, true));
