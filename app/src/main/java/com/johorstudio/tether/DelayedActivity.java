@@ -582,7 +582,22 @@ public class DelayedActivity extends Activity {
                 r.addView(tm, tp);
                 ProgressBar pb = new ProgressBar(DelayedActivity.this, null, android.R.attr.progressBarStyleHorizontal);
                 pb.setMax(100);
-                RelativeLayout.LayoutParams pp = new RelativeLayout.LayoutParams(dp(84), dp(14));
+                android.graphics.drawable.GradientDrawable pbg = new android.graphics.drawable.GradientDrawable();
+                pbg.setColor(Color.rgb(230, 230, 230)); pbg.setCornerRadius(dp(8));
+                android.graphics.drawable.GradientDrawable pfg = new android.graphics.drawable.GradientDrawable();
+                pfg.setColor(RED); pfg.setCornerRadius(dp(8));
+                android.graphics.drawable.ClipDrawable pcl = new android.graphics.drawable.ClipDrawable(pfg, Gravity.LEFT, android.graphics.drawable.ClipDrawable.HORIZONTAL);
+                android.graphics.drawable.LayerDrawable pld = new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{pbg, pcl});
+                pld.setId(0, android.R.id.background);
+                pld.setId(1, android.R.id.progress);
+                pb.setProgressDrawable(pld);
+                // white pill with padding around the bar
+                android.graphics.drawable.GradientDrawable pill = new android.graphics.drawable.GradientDrawable();
+                pill.setColor(Color.WHITE); pill.setCornerRadius(dp(14));
+                pb.setBackground(pill);
+                pb.setPadding(dp(5), dp(5), dp(5), dp(5));
+                pb.setElevation(dp(3));
+                RelativeLayout.LayoutParams pp = new RelativeLayout.LayoutParams(dp(130), dp(26));
                 pp.addRule(RelativeLayout.CENTER_IN_PARENT);
                 r.addView(pb, pp);
                 h = new Holder();
@@ -620,7 +635,7 @@ public class DelayedActivity extends Activity {
             if (working) {
                 Integer pct = copyPct.get(id);
                 h.pb.setVisibility(View.VISIBLE);
-                if (downloading.contains(id) && pct != null) { h.pb.setIndeterminate(false); h.pb.setProgress(pct); h.pb.setProgressTintList(android.content.res.ColorStateList.valueOf(RED)); h.pb.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(0x99000000)); }
+                if (downloading.contains(id) && pct != null) { h.pb.setIndeterminate(false); h.pb.setProgress(pct); }
                 else { h.pb.setIndeterminate(true); h.pb.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(RED)); }
             } else h.pb.setVisibility(View.GONE);
 

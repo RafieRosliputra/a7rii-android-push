@@ -458,6 +458,11 @@ public class TetherService extends Service {
             String fname = oi.filename.isEmpty() ? String.format("IMG_%08X.JPG", handle) : oi.filename;
             if (!fname.matches("[A-Za-z0-9._ -]{1,64}"))
                 throw new IOException("Corrupt photo info (invalid filename), try again");
+            // JPEG only: RAW (ARW etc.) is never pulled from the camera.
+            if (!fname.toLowerCase(Locale.US).matches(".*\\.jpe?g$")) {
+                log("Skipped " + fname + " (not JPEG)");
+                return false;
+            }
             String key = fname + "|" + oi.size;
             if (recent.contains(key)) return false;
 
