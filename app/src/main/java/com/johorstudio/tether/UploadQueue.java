@@ -127,6 +127,13 @@ public class UploadQueue extends Thread {
         return null;
     }
 
+    /** "queued" | "ok" | "dup" | "bad" | null (never seen). */
+    public synchronized String statusOf(String key) {
+        if (key == null) return null;
+        for (Job x : jobs) if (key.equals(x.key)) return "queued";
+        return stateOf(key);
+    }
+
     private synchronized void record(String name, String key, String state) {
         try {
             JSONObject o = new JSONObject();
@@ -283,7 +290,7 @@ public class UploadQueue extends Thread {
                 j.attempts++;
                 save();
                 listener.onLog("Upload " + j.name + ": " + e.getMessage());
-                if (j.attempts >= 8 && e instanceof java.io.FileNotFoundException) {
+                if (e instanceof java.io.FileNotFoundException && (j.attempts >= 8 || "file".equals(Uri.parse(j.uri).getScheme()))) { // our own cache copy is gone: no point retrying, and it must not block the queue head
                     listener.onLog("Fail tiada dalam telefon lagi, dibuang dari giliran: " + j.name);
                     record(j.name, j.key, "bad");
                     finish(j);

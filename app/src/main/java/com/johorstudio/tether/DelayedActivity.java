@@ -56,6 +56,8 @@ public class DelayedActivity extends Activity {
     private UploadedStore store;
     private CameraBrowser browser;
     private UploadQueue queue;
+    private static UploadQueue sharedQueue; // one queue per process: a second instance would re-read the same upload-queue.json and race on the cache files
+    private static volatile DelayedActivity current;
 
     private final List<CameraBrowser.Item> items = new ArrayList<>();
     private final List<CameraBrowser.Item> visible = new ArrayList<>();
@@ -78,22 +80,32 @@ public class DelayedActivity extends Activity {
         super.onCreate(b);
         store = new UploadedStore(this);
         buildUi();
-        queue = new UploadQueue(this, App.api(this), new UploadQueue.Listener() {
-            @Override public void onQueue(int p, int up) { setStatus("Giliran " + p + " · dihantar " + up); }
-            @Override public void onServer(String text, boolean ok) { setStatus(text); }
-            @Override public void onStage(String text) { setStatus(text); }
-            @Override public void onLog(String s) { log(s); }
-        });
-        queue.setSuccessListener(new UploadQueue.Success() {
-            @Override public void onSuccess(String name, String ref) {
-                if (ref != null) {
-                    store.markUploaded(ref);
-                    new File(getCacheDir(), "delayed-jpg/" + CameraBrowser.digest(ref) + ".jpg").delete();
-                }
-                runOnUiThread(new Runnable() { @Override public void run() { rebuildVisible(); } });
+        synchronized (DelayedActivity.class) {
+            if (sharedQueue == null) {
+                final android.content.Context appCtx = getApplicationContext();
+                sharedQueue = new UploadQueue(appCtx, App.api(this), new UploadQueue.Listener() {
+                    @Override public void onQueue(int p, int up) { DelayedActivity a = current; if (a != null) a.setStatus("Giliran " + p + " · dihantar " + up); }
+                    @Override public void onServer(String text, boolean ok) { DelayedActivity a = current; if (a != null) a.setStatus(text); }
+                    @Override public void onStage(String text) { DelayedActivity a = current; if (a != null) a.setStatus(text); }
+                    @Override public void onLog(String s) { DelayedActivity a = current; if (a != null) a.log(s); }
+                });
+                sharedQueue.setSuccessListener(new UploadQueue.Success() {
+                    @Override public void onSuccess(String name, String ref) {
+                        if (ref != null) {
+                            new UploadedStore(appCtx).markUploaded(ref);
+                            new File(appCtx.getCacheDir(), "delayed-jpg/" + CameraBrowser.digest(ref) + ".jpg").delete();
+                        }
+                        final DelayedActivity a = current;
+                        if (a != null) a.runOnUiThread(new Runnable() { @Override public void run() { a.rebuildVisible(); } });
+                    }
+                });
+                sharedQueue.start();
+            } else {
+                sharedQueue.setApi(App.api(this));
             }
-        });
-        queue.start();
+            queue = sharedQueue;
+            current = this;
+        }
         resolveTree();
     }
 
@@ -102,7 +114,7 @@ public class DelayedActivity extends Activity {
         destroyed = true;
         if (browser != null) browser.cancel();
         // The upload queue keeps running so uploads finish; it owns the copied cache files.
-        if (queue != null && queue.pending() == 0) queue.shutdown();
+        if (current == this) current = null;
     }
 
     // ------------------------------------------------------------------ SAF tree
@@ -390,19 +402,20 @@ public class DelayedActivity extends Activity {
                 try {
                     markState(it, true);
                     if (it.key == null) it.key = UploadQueue.keyFor(getContentResolver(), it.uri, it.name, it.size, it.lastModified);
+                    String st = queue.statusOf(it.key);
+                    if ("queued".equals(st)) { markState(it, false); setStatus("Sudah dalam giliran: " + it.name); continue; }
+                    if ("ok".equals(st) || "dup".equals(st)) {
+                        final String k0 = it.key;
+                        runOnUiThread(new Runnable() { @Override public void run() { store.markUploaded(k0); rebuildVisible(); } });
+                        markState(it, false); setStatus("Sudah dihantar: " + it.name); continue;
+                    }
                     out = new File(dir, CameraBrowser.digest(it.key) + ".jpg");
                     copyToCache(it, out);
                     final File f = out;
                     boolean added = queue.add(Uri.fromFile(f), it.name, eventId, quality, it.key);
                     markState(it, false);
                     if (!added) {
-                        f.delete();
-                        final String k = it.key;
-                        runOnUiThread(new Runnable() { @Override public void run() {
-                            store.markUploaded(k);
-                            rebuildVisible();
-                        }});
-                        setStatus("Sudah dihantar: " + it.name);
+                        setStatus("Sudah dalam giliran: " + it.name);
                     } else {
                         setStatus("Giliran: " + it.name);
                     }
@@ -414,7 +427,7 @@ public class DelayedActivity extends Activity {
                 }
             }
             busy = false;
-            runOnUiThread(new Runnable() { @Override public void run() { adapter.notifyDataSetChanged(); } });
+            runOnUiThread(new Runnable() { @Override public void run() { selected.clear(); updateCount(); rebuildVisible(); } });
             setStatus("Siap giliran " + list.size() + " gambar");
         }}).start();
     }
@@ -422,7 +435,8 @@ public class DelayedActivity extends Activity {
     private void copyToCache(CameraBrowser.Item it, File out) throws IOException {
         InputStream in = getContentResolver().openInputStream(it.uri);
         if (in == null) throw new IOException("Tidak dapat baca " + it.name);
-        FileOutputStream fo = new FileOutputStream(out);
+        final File part = new File(out.getPath() + ".part");
+        FileOutputStream fo = new FileOutputStream(part);
         final long[] lastUi = {0};
         byte[] buf = new byte[64 * 1024];
         long done = 0;
@@ -442,6 +456,7 @@ public class DelayedActivity extends Activity {
             try { in.close(); } catch (IOException ignored) {}
             fo.close();
         }
+        if (!part.renameTo(out)) throw new IOException("Gagal simpan salinan " + it.name);
     }
 
     private void markState(final CameraBrowser.Item it, final boolean on) {

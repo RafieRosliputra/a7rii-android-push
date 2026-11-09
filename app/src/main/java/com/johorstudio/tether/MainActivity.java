@@ -355,6 +355,7 @@ public class MainActivity extends Activity implements TetherService.Listener {
                 button("Log keluar", false, new View.OnClickListener() { @Override public void onClick(View v) { logout(); } })));
         root.addView(row(
                 button("Sambung semula kamera", false, new View.OnClickListener() { @Override public void onClick(View v) {
+                    if (delayedMode()) { openDelayed(); return; }
                     TetherService s = TetherService.get();
                     if (s == null) findCamera(); else s.reconnect();
                 }}),
