@@ -574,8 +574,8 @@ public class DelayedActivity extends Activity {
                 r.addView(tm, tp);
                 ProgressBar pb = new ProgressBar(DelayedActivity.this, null, android.R.attr.progressBarStyleHorizontal);
                 pb.setMax(100);
-                RelativeLayout.LayoutParams pp = new RelativeLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(5));
-                pp.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
+                RelativeLayout.LayoutParams pp = new RelativeLayout.LayoutParams(dp(84), dp(14));
+                pp.addRule(RelativeLayout.CENTER_IN_PARENT);
                 r.addView(pb, pp);
                 h = new Holder();
                 h.img = img;

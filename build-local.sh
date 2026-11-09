@@ -6,7 +6,7 @@
 set -euo pipefail
 P="$(cd "$(dirname "$0")" && pwd)"
 B="${BUILD_DIR:-$P/build}"
-VERSION_CODE=20; VERSION_NAME=4.5.1
+VERSION_CODE=21; VERSION_NAME=4.5.2
 SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}"
 BT="${BUILD_TOOLS:-$(ls -d "$SDK"/build-tools/* 2>/dev/null | sort -V | tail -1)}"
 AJAR="${ANDROID_JAR:-$SDK/platforms/android-33/android.jar}"
