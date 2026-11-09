@@ -319,7 +319,7 @@ public class TetherService extends Service {
         boolean jpg = fname.toLowerCase(Locale.US).matches(".*\\.jpe?g$");
         if (eventId.isEmpty()) { log("No event selected: " + fname + " saved on the phone only"); return; }
         if (!prefs.getBoolean("upload_on", true)) return;
-        if (!jpg) { log(fname + " is not JPEG, not sent (set the camera to JPEG or RAW+JPEG)"); return; }
+        if (!jpg) { log(fname + " is saved on phone (RAW), not sent"); return; }
         queue.add(uri, fname, eventId, prefs.getInt("quality", 50));
     }
 
@@ -458,20 +458,7 @@ public class TetherService extends Service {
             String fname = oi.filename.isEmpty() ? String.format("IMG_%08X.JPG", handle) : oi.filename;
             if (!fname.matches("[A-Za-z0-9._ -]{1,64}"))
                 throw new IOException("Corrupt photo info (invalid filename), try again");
-            // JPEG only: RAW (ARW etc.) is never pulled from the camera.
-            if (!fname.toLowerCase(Locale.US).matches(".*\\.jpe?g$")) {
-                if (!sonyQueue) { log("Skipped " + fname + " (not JPEG)"); return false; }
-                // Sony keeps shots in a queue: a RAW left at the front blocks the JPEG behind it.
-                // Read it into nowhere (nothing saved or sent) so the queue moves on.
-                log("Discarding " + fname + " (not JPEG, " + mb(oi.size & 0xFFFFFFFFL) + ")");
-                setStage("Skipping " + fname + " (RAW)…");
-                Ptp.Response dr = ptp.getObject(handle, new java.io.OutputStream() {
-                    @Override public void write(int b) {}
-                    @Override public void write(byte[] b, int o, int l) {}
-                }, new Ptp.Progress() { @Override public void onProgress(long done, long total) {} });
-                if (!dr.ok()) { log(String.format("Discard failed 0x%04X", dr.code)); return false; }
-                return true;
-            }
+            // RAW is saved on the phone like any shot (the camera cannot keep it on its card); only JPEG is sent to the server.
             String key = fname + "|" + oi.size;
             if (recent.contains(key)) return false;
 
