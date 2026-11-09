@@ -247,3 +247,19 @@ Tanpa Android SDK/Gradle, untuk persekitaran yang tidak dapat capai `dl.google.c
 - libgphoto2 `camlibs/ptp2` (`ptp.c`, `library.c`): kod Sony SDIO dan `0xD215`
 - PIMA 15740 / USB Still Image Capture Device Definition
 - Analisis APK Piufoto v3.62.3 (`com.alltuu.android.piufoto`)
+
+
+## Linked repos (keep in sync)
+
+This app talks to the server repo **[johorstudio-livephoto-events](https://github.com/RafieRosliputra/johorstudio-livephoto-events)** (branch `main`, live.johorstudio.com). Change one side, check the other.
+
+| App feature | Server side (repo above) |
+|---|---|
+| Photographer login (code + name) | `POST /auth/code` |
+| Session / guest link / guest code | `GET /api/shoot` (`guestUrl`, `guestCode`) |
+| Upload queue | `POST /api/shoot/uploads`, `PUT /api/uploads/:id`, `/complete`, `POST /api/shoot/check` |
+| Uploaded photos page (list / delete own) | `GET /api/shoot/photos`, `/photos/:id/:size`, `DELETE /api/shoot/photos/:id` |
+| In-app update (red version) | `GET /api/shoot/app`, `/api/shoot/app.apk` (APK uploaded in `/admin`; name `JSTether-vX.Y.Z.apk`) |
+| Photographer link / QR | `https://live.johorstudio.com/join/<code>` -> opens app (`jstether://login?code=`), `/.well-known/assetlinks.json` holds the release key fingerprint |
+
+Releases: build with `./build-local.sh` (release.keystore, never lose it), copy to `releases/`, upload the APK at https://live.johorstudio.com/admin. Branch `v4`.
