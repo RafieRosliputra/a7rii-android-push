@@ -30,7 +30,10 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
+import java.util.Locale;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -451,7 +454,23 @@ public class DelayedActivity extends Activity {
     // ------------------------------------------------------------------ grid adapter
 
     private class Adapter extends BaseAdapter {
-        class Holder { ImageView img; TextView badge; }
+        class Holder { ImageView img; TextView badge; TextView time; }
+
+        /** Time only, 12-hour with AM/PM (e.g. 4:20 PM). EXIF time from the key when known, else file time. */
+        private String timeLabel(CameraBrowser.Item it) {
+            try {
+                if (it.key != null) {
+                    String[] p = it.key.split("\\|");
+                    if (p.length >= 3 && p[2].matches("\\d{4}:\\d{2}:\\d{2} \\d{2}:\\d{2}:\\d{2}")) {
+                        int hh = Integer.parseInt(p[2].substring(11, 13));
+                        String mm = p[2].substring(14, 16);
+                        return ((hh % 12 == 0) ? 12 : hh % 12) + ":" + mm + (hh < 12 ? " AM" : " PM");
+                    }
+                }
+            } catch (Exception ignored) {}
+            if (it.lastModified <= 0) return "";
+            return new SimpleDateFormat("h:mm a", Locale.ENGLISH).format(new Date(it.lastModified));
+        }
 
         @Override public int getCount() { return visible.size(); }
         @Override public Object getItem(int i) { return visible.get(i); }
@@ -476,9 +495,20 @@ public class DelayedActivity extends Activity {
                 bp.addRule(RelativeLayout.ALIGN_PARENT_RIGHT);
                 bp.setMargins(0, dp(4), dp(4), 0);
                 r.addView(badge, bp);
+                TextView tm = new TextView(DelayedActivity.this);
+                tm.setTextSize(10);
+                tm.setTextColor(Color.WHITE);
+                tm.setTypeface(Typeface.DEFAULT_BOLD);
+                tm.setBackgroundColor(0xAA000000);
+                tm.setPadding(dp(4), dp(1), dp(4), dp(1));
+                RelativeLayout.LayoutParams tp = new RelativeLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                tp.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
+                tp.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
+                r.addView(tm, tp);
                 h = new Holder();
                 h.img = img;
                 h.badge = badge;
+                h.time = tm;
                 r.setTag(h);
                 convert = r;
             } else {
@@ -498,6 +528,7 @@ public class DelayedActivity extends Activity {
             if (sel && !up) bg.setStroke(dp(2), TEAL_LIGHT);
             h.img.setBackground(bg);
 
+            h.time.setText(timeLabel(it));
             h.img.setTag(id);
             if (browser != null && it.key == null) browser.loadKey(it, listener);
             Bitmap b = thumbCache.get(id);
