@@ -1,27 +1,25 @@
 # Delayed Tether (tarik dari SD)
 
+## Kenapa bukan PTP
+- A7R II dalam PC Remote: GetObjectHandles 0x1007 balik "USB baca gagal"; kamera tak dedah SD via PTP.
+- Keputusan (Rafi): Delayed guna USB Connection = Mass Storage. Telefon baca SD sebagai Android
+  storage melalui Storage Access Framework (SAF). Direct kekal PC Remote, tak disentuh.
+
 ## Reka bentuk
-- Photog ambil gambar tanpa telefon (kamera simpan ke SD). Kemudian USB PC Remote (PTP).
-- Mod Direct kekal (TetherService + live.johorstudio.com tak berubah). Mod Delayed: MainActivity buka
-  PTP + handshake Sony, terus buka DelayedActivity. Pilihan mod disimpan dalam SharedPreferences (`mode`).
-- DelayedActivity: grid thumbnail SD, badge "uploaded", multi-pilih, "Pilih semua baru", tapis
-  semua|belum, Upload. Hanya JPEG dipilih dimuat turun penuh, WebP (PhotoEncoder) + UploadQueue seperti Direct.
+- DelayedActivity: pemilih ACTION_OPEN_DOCUMENT_TREE (hint: pilih DCIM). Ambil persistable read
+  permission, simpan tree URI dalam SharedPreferences (`delayed_tree`, asing dari folder Direct).
+- Butang "Tukar kad" buka semula pemilih. URI hilang kebenaran / kad tiada → mesej + pemilih.
+- CameraBrowser: recursive `buildChildDocumentsUriUsingTree` (DOCUMENT_ID, DISPLAY_NAME, SIZE,
+  LAST_MODIFIED, MIME_TYPE), tanpa DocumentFile. JPEG sahaja (.jpg/.jpeg), skip ARW, newest first,
+  incremental/paged UI. Thumbnail EXIF malas (visible sahaja) + fallback inSampleSize ~320px,
+  LRU memori + cacheDir, threadpool 3, batal bila scrolled away.
 
-## Operasi PTP
-- GetStorageIDs 0x1004 → GetObjectHandles 0x1007 (semua format, parent 0xFFFFFFFF) → GetObjectInfo 0x1008
-  (nama, saiz, capture date, format, thumb size). Hanya JPEG (format 0x3801 atau .JPG/.jpeg).
-- GetThumb 0x100A (fallback: GetPartialObject 0x101B 64KB pertama + EXIF thumbnail, else placeholder).
-- GetObject 0x1009 (penuh) untuk muat turun dipilih. `Ptp.transact` synchronized → satu transaksi pada satu masa;
-  thumb dihenti sementara semasa muat turun.
+## Key & upload
+- Key = `UploadQueue.keyFor` (name|size|EXIF time), satu sumber: badge UploadedStore + queue.add.
+  queue.add return false (dah hantar/dalam giliran) → tandai badge.
+- Upload: salin SAF → cacheDir/delayed-jpg/<hash>.jpg, queue dari fail cache (bukan SAF terus,
+  kad boleh dicabut), padam selepas berjaya.
 
-## Format key (UploadedStore)
-- `name|size|captureDate` (cth `DSC00001.JPG|24150000|2026-11-09T10:30:00`). Disimpan dalam `uploaded.json` (filesDir).
-
-## Fail baharu
-- Ptp (ops + browse helper), CameraBrowser, UploadedStore, DelayedActivity; UploadQueue + success hook `ref` (additive).
-
-## Risiko / andaian
-- ANDAIAN (belum disahkan): A7R II dedahkan SD dalam mod PC Remote PTP. Kalau 0 handle → mesej
-  "Kamera tak dedah kad SD dalam PC Remote" + dump storageIDs/handleCount/ops ke log.
-- GetThumb mungkin tiada dalam PC Remote; fallback EXIF/placeholder.
-- Delayed guna UploadQueue sendiri (fail giliran sama dengan Direct). Jangan jalankan Direct serentak.
+## Risiko
+- exFAT dipasang hanya pada sesetengah telefon; kad NTFS/besar mungkin tak dibaca.
+- Membaca EXIF bagi banyak fail di luar UI thread; senarai sangat besar tetap lambat.

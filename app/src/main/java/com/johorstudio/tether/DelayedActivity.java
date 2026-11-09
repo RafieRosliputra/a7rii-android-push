@@ -1,12 +1,16 @@
 package com.johorstudio.tether;
 
 import android.app.Activity;
+import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.content.ContentResolver;
+import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.provider.DocumentsContract;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
@@ -24,6 +28,8 @@ import android.widget.Toast;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -33,28 +39,27 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Delayed tether: browse the SD card over PTP, mark uploaded vs not, select JPEGs,
- * download only the selected ones and push them through the normal PhotoEncoder + UploadQueue path.
+ * Delayed tether: browse the camera SD card as Android storage (USB Connection = Mass Storage)
+ * via the Storage Access Framework. Mark uploaded vs not, select JPEGs, copy the selected ones
+ * to the phone cache and push them through the normal PhotoEncoder + UploadQueue path.
  */
 public class DelayedActivity extends Activity {
-    static volatile Ptp sharedPtp;
-    static volatile android.hardware.usb.UsbDevice sharedDevice;
+    private static final int REQ_PICK_TREE = 100;
 
     private static final int BG = Color.rgb(22, 28, 31), CARD = Color.rgb(32, 39, 43), TEAL = Color.rgb(31, 111, 104),
             TEAL_LIGHT = Color.rgb(108, 196, 185), MUTED = Color.rgb(150, 165, 168), RED = Color.rgb(224, 86, 78),
             GREEN = Color.rgb(120, 220, 150), AMBER = Color.rgb(255, 190, 120);
 
-    private Ptp ptp;
     private UploadedStore store;
     private CameraBrowser browser;
     private UploadQueue queue;
 
     private final List<CameraBrowser.Item> items = new ArrayList<>();
     private final List<CameraBrowser.Item> visible = new ArrayList<>();
-    private final LinkedHashSet<String> selected = new LinkedHashSet<>();
+    private final LinkedHashSet<String> selected = new LinkedHashSet<>(); // documentIds
     private final Set<String> downloading = new HashSet<>();
     private final LinkedHashMap<String, Bitmap> thumbCache = new LinkedHashMap<String, Bitmap>(64, 0.75f, true) {
-        @Override protected boolean removeEldestEntry(Map.Entry<String, Bitmap> e) { return size() > 300; }
+        @Override protected boolean removeEldestEntry(Map.Entry<String, Bitmap> e) { return size() > 120; }
     };
 
     private boolean filterNewOnly = false;
@@ -68,10 +73,7 @@ public class DelayedActivity extends Activity {
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
-        ptp = sharedPtp;
-        if (ptp == null) { toast("Tiada kamera Delayed dibuka"); finish(); return; }
         store = new UploadedStore(this);
-        browser = new CameraBrowser(this, ptp);
         buildUi();
         queue = new UploadQueue(this, App.api(this), new UploadQueue.Listener() {
             @Override public void onQueue(int p, int up) { setStatus("Giliran " + p + " · dihantar " + up); }
@@ -89,19 +91,74 @@ public class DelayedActivity extends Activity {
             }
         });
         queue.start();
-        log("Membaca kad SD…");
-        browser.browse(listener);
+        resolveTree();
     }
 
     @Override protected void onDestroy() {
         super.onDestroy();
         destroyed = true;
-        // Keep the queue running so uploads finish; only release the camera when idle.
-        if (ptp != null && !busy) {
-            try { ptp.closeSession(); } catch (Exception ignored) {}
-            try { ptp.close(); } catch (Exception ignored) {}
+        if (browser != null) browser.cancel();
+        // The upload queue keeps running so uploads finish; it owns the copied cache files.
+        if (queue != null && queue.pending() == 0) queue.shutdown();
+    }
+
+    // ------------------------------------------------------------------ SAF tree
+
+    private void resolveTree() {
+        String saved = App.prefs(this).getString("delayed_tree", null);
+        if (saved == null) { openPicker(); return; }
+        Uri tree = Uri.parse(saved);
+        if (treeUsable(tree)) startBrowse(tree);
+        else {
+            App.prefs(this).edit().remove("delayed_tree").apply();
+            toast("Kebenaran kad hilang atau kad tiada. Pilih folder DCIM semula.");
+            openPicker();
         }
-        if (sharedPtp == ptp) sharedPtp = null;
+    }
+
+    private boolean treeUsable(Uri tree) {
+        Cursor c = null;
+        try {
+            String id = DocumentsContract.getTreeDocumentId(tree);
+            Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, id);
+            c = getContentResolver().query(children, new String[] { DocumentsContract.Document.COLUMN_DOCUMENT_ID }, null, null, null);
+            return c != null;
+        } catch (Exception e) {
+            return false;
+        } finally { if (c != null) c.close(); }
+    }
+
+    private void openPicker() {
+        setStatus("Pilih kad kamera (DCIM)");
+        try {
+            Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            startActivityForResult(i, REQ_PICK_TREE);
+        } catch (Exception e) {
+            toast("Tiada pemilih folder pada peranti ini");
+        }
+    }
+
+    @Override protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req == REQ_PICK_TREE && res == RESULT_OK && data != null && data.getData() != null) {
+            Uri tree = data.getData();
+            try {
+                getContentResolver().takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Exception e) {
+                toast("Gagal simpan kebenaran: " + e.getMessage());
+            }
+            App.prefs(this).edit().putString("delayed_tree", tree.toString()).apply();
+            startBrowse(tree);
+        }
+    }
+
+    private void startBrowse(Uri tree) {
+        if (browser != null) browser.cancel();
+        browser = new CameraBrowser(this, tree);
+        setStatus("Membaca kad SD…");
+        log("Membaca kad SD (SAF)…");
+        browser.browse(listener);
     }
 
     // ------------------------------------------------------------------ UI kit
@@ -167,6 +224,7 @@ public class DelayedActivity extends Activity {
         brand.setLetterSpacing(0.1f);
         root.addView(brand);
         root.addView(text("Tarik dari SD (Delayed)", 22, Color.WHITE, true));
+        root.addView(text("Set kamera: MENU > Setup > USB Connection > Mass Storage, kemudian cucuk USB", 14, AMBER, true));
         root.addView(text("Pilih JPEG dari kad kamera; telefon hantar yang dipilih sahaja.", 13, MUTED, false));
 
         tvStatus = text("Membaca kad…", 14, Color.WHITE, false);
@@ -174,20 +232,25 @@ public class DelayedActivity extends Activity {
 
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
+        Button swap = button("Tukar kad", false, new View.OnClickListener() { @Override public void onClick(View v) { openPicker(); } });
         filterBtn = button("Tapis: semua", false, new View.OnClickListener() { @Override public void onClick(View v) {
             filterNewOnly = !filterNewOnly;
             filterBtn.setText(filterNewOnly ? "Tapis: belum" : "Tapis: semua");
             rebuildVisible();
         }});
         Button selAll = button("Pilih semua baru", false, new View.OnClickListener() { @Override public void onClick(View v) { selectAllNew(); } });
-        uploadBtn = button("Upload (0)", true, new View.OnClickListener() { @Override public void onClick(View v) { uploadSelected(); } });
         LinearLayout.LayoutParams lp1 = new LinearLayout.LayoutParams(0, dp(46), 1f); lp1.setMargins(0, dp(4), dp(4), dp(4));
         LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(0, dp(46), 1f); lp2.setMargins(dp(4), dp(4), dp(4), dp(4));
         LinearLayout.LayoutParams lp3 = new LinearLayout.LayoutParams(0, dp(46), 1f); lp3.setMargins(dp(4), dp(4), 0, dp(4));
-        bar.addView(filterBtn, lp1);
-        bar.addView(selAll, lp2);
-        bar.addView(uploadBtn, lp3);
+        bar.addView(swap, lp1);
+        bar.addView(filterBtn, lp2);
+        bar.addView(selAll, lp3);
         root.addView(bar);
+
+        uploadBtn = button("Upload (0)", true, new View.OnClickListener() { @Override public void onClick(View v) { uploadSelected(); } });
+        LinearLayout.LayoutParams uplp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
+        uplp.setMargins(0, dp(4), 0, dp(4));
+        root.addView(uploadBtn, uplp);
 
         grid = new GridView(this);
         grid.setNumColumns(GridView.AUTO_FIT);
@@ -203,6 +266,10 @@ public class DelayedActivity extends Activity {
         });
         grid.setOnItemLongClickListener(new android.widget.AdapterView.OnItemLongClickListener() {
             @Override public boolean onItemLongClick(android.widget.AdapterView<?> p, View v, int pos, long id) { toggleSelect(visible.get(pos)); return true; }
+        });
+        grid.setOnScrollListener(new AbsListView.OnScrollListener() {
+            @Override public void onScrollStateChanged(AbsListView v, int s) {}
+            @Override public void onScroll(AbsListView v, int first, int cnt, int total) { retainWanted(); }
         });
         root.addView(grid, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
@@ -227,14 +294,16 @@ public class DelayedActivity extends Activity {
             rebuildVisible();
             setStatus(items.size() + " JPEG dijumpai · pilih untuk upload");
         }
-        @Override public void onThumb(CameraBrowser.Item item, Bitmap bmp) {
-            thumbCache.put(item.key(), bmp);
-            updateVisible(item.key());
+        @Override public void onKey(CameraBrowser.Item item) {
+            rebuildVisible(); // keys change the "belum" filter and badges
         }
-        @Override public void onEmpty(int storages, int handles) {
-            setStatus("Kamera tak dedah kad SD dalam PC Remote");
-            toast("Kamera tak dedah kad SD dalam PC Remote");
-            dumpEmpty(storages, handles);
+        @Override public void onThumb(CameraBrowser.Item item, Bitmap bmp) {
+            thumbCache.put(item.documentId, bmp);
+            updateVisible(item.documentId);
+        }
+        @Override public void onEmpty() {
+            setStatus("Tiada JPEG dijumpai. Pilih folder DCIM/kad kamera");
+            toast("Tiada JPEG dijumpai. Pilih folder DCIM/kad kamera");
         }
         @Override public void onError(String msg) {
             setStatus("Ralat: " + msg);
@@ -245,7 +314,7 @@ public class DelayedActivity extends Activity {
     private void rebuildVisible() {
         visible.clear();
         for (CameraBrowser.Item it : items) {
-            if (!filterNewOnly || !store.isUploaded(it.key())) visible.add(it);
+            if (!filterNewOnly || it.key == null || !store.isUploaded(it.key)) visible.add(it);
         }
         adapter.notifyDataSetChanged();
         updateCount();
@@ -255,46 +324,45 @@ public class DelayedActivity extends Activity {
         uploadBtn.setText("Upload (" + selected.size() + ")");
     }
 
-    private void updateVisible(String key) {
-        final Bitmap b = thumbCache.get(key);
+    private void retainWanted() {
+        if (browser == null) return;
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < grid.getChildCount(); i++) {
+            View v = grid.getChildAt(i);
+            if (v == null) continue;
+            Object t = v.getTag();
+            if (t instanceof Adapter.Holder && ((Adapter.Holder) t).img.getTag() instanceof String)
+                ids.add((String) ((Adapter.Holder) t).img.getTag());
+        }
+        browser.retainVisible(ids);
+    }
+
+    private void updateVisible(String id) {
+        final Bitmap b = thumbCache.get(id);
         if (b == null) return;
         for (int i = 0; i < grid.getChildCount(); i++) {
             View v = grid.getChildAt(i);
             if (v == null) continue;
             Object t = v.getTag();
-            if (t instanceof Adapter.Holder && key.equals(((Adapter.Holder) t).img.getTag())) {
+            if (t instanceof Adapter.Holder && id.equals(((Adapter.Holder) t).img.getTag())) {
                 ((Adapter.Holder) t).img.setImageBitmap(b);
             }
         }
     }
 
     private void toggleSelect(CameraBrowser.Item it) {
-        String k = it.key();
-        if (selected.contains(k)) selected.remove(k); else selected.add(k);
+        String id = it.documentId;
+        if (selected.contains(id)) selected.remove(id); else selected.add(id);
         adapter.notifyDataSetChanged();
         updateCount();
     }
 
     private void selectAllNew() {
         selected.clear();
-        for (CameraBrowser.Item it : visible) if (!store.isUploaded(it.key())) selected.add(it.key());
+        for (CameraBrowser.Item it : visible) if (it.key == null || !store.isUploaded(it.key)) selected.add(it.documentId);
         adapter.notifyDataSetChanged();
         updateCount();
         setStatus("Dipilih " + selected.size() + " gambar baru");
-    }
-
-    private void dumpEmpty(final int storages, final int handles) {
-        new Thread(new Runnable() { @Override public void run() {
-            StringBuilder sb = new StringBuilder();
-            sb.append("DELAYED dump: storageIDs=").append(storages)
-              .append(" handleCount=").append(handles).append(" ops=[");
-            try {
-                Ptp.DeviceInfo d = ptp.getDeviceInfo();
-                for (int op : d.operations) sb.append(String.format("0x%04X ", op));
-            } catch (Exception e) { sb.append("tiada"); }
-            sb.append("]");
-            log(sb.toString());
-        }}).start();
     }
 
     // ------------------------------------------------------------------ upload
@@ -307,51 +375,75 @@ public class DelayedActivity extends Activity {
         if (App.api(this) == null) { toast("Belum log masuk"); return; }
         final int quality = App.prefs(this).getInt("quality", 50);
         final List<CameraBrowser.Item> list = new ArrayList<>();
-        for (String k : selected) for (CameraBrowser.Item it : items) if (it.key().equals(k)) { list.add(it); break; }
+        for (String id : selected) for (CameraBrowser.Item it : items) if (it.documentId.equals(id)) { list.add(it); break; }
         busy = true;
-        browser.setPaused(true);
-        setStatus("Menarik " + list.size() + " gambar…");
+        setStatus("Menyalin " + list.size() + " gambar…");
         new Thread(new Runnable() { @Override public void run() {
             File dir = new File(getCacheDir(), "delayed-jpg");
             dir.mkdirs();
             for (final CameraBrowser.Item it : list) {
+                if (destroyed) break;
+                File out = null;
                 try {
                     markState(it, true);
-                    final File out = new File(dir, CameraBrowser.digest(it.key()) + ".jpg");
-                    final long[] lastUi = {0};
-                    Ptp.Response r = ptp.getObject(it.handle, new FileOutputStream(out), new Ptp.Progress() {
-                        @Override public void onProgress(final long done, final long total) {
-                            long now = System.currentTimeMillis();
-                            if (now - lastUi[0] > 200) {
-                                lastUi[0] = now;
-                                setStatus("Menarik " + it.name + " " + (total > 0 ? (int) (done * 100 / total) : 0) + "%");
-                            }
-                        }
-                    });
-                    if (!r.ok()) throw new java.io.IOException("GetObject gagal 0x" + Integer.toHexString(r.code));
-                    queue.add(Uri.fromFile(out), it.name, eventId, quality, it.key());
+                    if (it.key == null) it.key = UploadQueue.keyFor(getContentResolver(), it.uri, it.name, it.size, it.lastModified);
+                    out = new File(dir, CameraBrowser.digest(it.key) + ".jpg");
+                    copyToCache(it, out);
+                    final File f = out;
+                    boolean added = queue.add(Uri.fromFile(f), it.name, eventId, quality, it.key);
                     markState(it, false);
-                    setStatus("Giliran: " + it.name);
+                    if (!added) {
+                        f.delete();
+                        final String k = it.key;
+                        runOnUiThread(new Runnable() { @Override public void run() {
+                            store.markUploaded(k);
+                            rebuildVisible();
+                        }});
+                        setStatus("Sudah dihantar: " + it.name);
+                    } else {
+                        setStatus("Giliran: " + it.name);
+                    }
                 } catch (final Exception e) {
-                    log("Ralat tarik " + it.name + ": " + e.getMessage());
+                    if (out != null) out.delete();
+                    log("Ralat salin " + it.name + ": " + e.getMessage());
                     setStatus("Ralat " + it.name + ": " + e.getMessage());
                     markState(it, false);
                 }
             }
             busy = false;
-            if (destroyed && ptp != null) {
-                try { ptp.closeSession(); } catch (Exception ignored) {}
-                try { ptp.close(); } catch (Exception ignored) {}
-            }
-            browser.setPaused(false);
             runOnUiThread(new Runnable() { @Override public void run() { adapter.notifyDataSetChanged(); } });
             setStatus("Siap giliran " + list.size() + " gambar");
         }}).start();
     }
 
+    private void copyToCache(CameraBrowser.Item it, File out) throws IOException {
+        InputStream in = getContentResolver().openInputStream(it.uri);
+        if (in == null) throw new IOException("Tidak dapat baca " + it.name);
+        FileOutputStream fo = new FileOutputStream(out);
+        final long[] lastUi = {0};
+        byte[] buf = new byte[64 * 1024];
+        long done = 0;
+        try {
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                fo.write(buf, 0, n);
+                done += n;
+                long now = System.currentTimeMillis();
+                if (now - lastUi[0] > 200) {
+                    lastUi[0] = now;
+                    final long d = done, total = it.size;
+                    setStatus("Menyalin " + it.name + (total > 0 ? " " + (int) (d * 100 / total) + "%" : ""));
+                }
+            }
+        } finally {
+            try { in.close(); } catch (IOException ignored) {}
+            fo.close();
+        }
+    }
+
     private void markState(final CameraBrowser.Item it, final boolean on) {
         runOnUiThread(new Runnable() { @Override public void run() {
-            if (on) downloading.add(it.key()); else downloading.remove(it.key());
+            if (on) downloading.add(it.documentId); else downloading.remove(it.documentId);
             adapter.notifyDataSetChanged();
         }});
     }
@@ -393,10 +485,10 @@ public class DelayedActivity extends Activity {
                 h = (Holder) convert.getTag();
             }
             final CameraBrowser.Item it = visible.get(position);
-            String key = it.key();
-            boolean up = store.isUploaded(key);
-            boolean sel = selected.contains(key);
-            if (downloading.contains(key)) { h.badge.setText("↻"); h.badge.setBackground(circle(AMBER)); }
+            String id = it.documentId;
+            boolean up = it.key != null && store.isUploaded(it.key);
+            boolean sel = selected.contains(id);
+            if (downloading.contains(id)) { h.badge.setText("↻"); h.badge.setBackground(circle(AMBER)); }
             else if (up) { h.badge.setText("✓"); h.badge.setBackground(circle(GREEN)); }
             else if (sel) { h.badge.setText("✓"); h.badge.setBackground(circle(TEAL)); }
             else { h.badge.setText(""); h.badge.setBackground(null); }
@@ -406,10 +498,11 @@ public class DelayedActivity extends Activity {
             if (sel && !up) bg.setStroke(dp(2), TEAL_LIGHT);
             h.img.setBackground(bg);
 
-            h.img.setTag(key);
-            Bitmap b = thumbCache.get(key);
+            h.img.setTag(id);
+            if (browser != null && it.key == null) browser.loadKey(it, listener);
+            Bitmap b = thumbCache.get(id);
             if (b != null) h.img.setImageBitmap(b);
-            else { h.img.setImageBitmap(null); browser.loadThumb(it, listener); }
+            else { h.img.setImageBitmap(null); if (browser != null) browser.loadThumb(it, listener); }
             return convert;
         }
     }

@@ -19,7 +19,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.DocumentsContract;
 import android.text.InputType;
-import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -35,7 +34,6 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -394,7 +392,7 @@ public class MainActivity extends Activity implements TetherService.Listener {
         if (delayedMode() && TetherService.get() == null) {
             tvCamera.setText("Mod: Delayed (tarik dari SD)");
             tvCamera.setTextColor(AMBER);
-            tvStage.setText("Sambungkan kamera (USB Connection: PC Remote) — ia buka skrin SD");
+            tvStage.setText("⚠ Set kamera: MENU > Setup > USB Connection > Mass Storage, kemudian cucuk USB");
         }
         TetherService s = TetherService.get();
         if (s != null) {
@@ -447,6 +445,12 @@ public class MainActivity extends Activity implements TetherService.Listener {
     @Override public void onChanged() {
         if (!"live".equals(screen) || tvCamera == null) return;
         TetherService s = TetherService.get();
+        if (delayedMode() && s == null) {
+            tvCamera.setText("Mod: Delayed (tarik dari SD)");
+            tvCamera.setTextColor(AMBER);
+            tvStage.setText("⚠ Set kamera: MENU > Setup > USB Connection > Mass Storage, kemudian cucuk USB");
+            return;
+        }
         if (s == null) {
             tvCamera.setText("Kamera: tidak bersambung");
             tvCamera.setTextColor(RED);
@@ -577,16 +581,15 @@ public class MainActivity extends Activity implements TetherService.Listener {
     // ------------------------------------------------------------------ USB
 
     private void findCamera() {
+        if (delayedMode()) return; // Delayed reads the SD card via SAF, not USB/PTP.
         for (UsbDevice d : usb.getDeviceList().values()) {
             if (Ptp.findPtpInterface(d) != null) { askUsb(d); return; }
         }
     }
 
     private void askUsb(UsbDevice d) {
-        if (usb.hasPermission(d)) {
-            if (delayedMode()) openDelayed(d); else TetherService.start(this, d);
-            return;
-        }
+        if (delayedMode()) return; // Delayed reads the SD card via SAF, not USB/PTP.
+        if (usb.hasPermission(d)) { TetherService.start(this, d); return; }
         Intent i = new Intent(ACTION_USB_PERMISSION).setPackage(getPackageName());
         int flags = Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0;
         usb.requestPermission(d, PendingIntent.getBroadcast(this, 0, i, flags));
@@ -601,46 +604,22 @@ public class MainActivity extends Activity implements TetherService.Listener {
             final boolean delayed = !delayedMode();
             prefs.edit().putString("mode", delayed ? "delayed" : "direct").apply();
             b.setText("Mod: " + modeLabel());
-            toast(delayed ? "Mod Delayed: kamera dibaca dari SD (PTP), bukan tether langsung"
+            toast(delayed ? "Mod Delayed: set kamera MENU > Setup > USB Connection > Mass Storage"
                            : "Mod Direct: tether langsung (PC Remote)");
-            if (delayed && TetherService.get() != null) {
-                startService(new Intent(MainActivity.this, TetherService.class).setAction(TetherService.ACTION_STOP));
+            if (delayed) {
+                if (TetherService.get() != null) {
+                    startService(new Intent(MainActivity.this, TetherService.class).setAction(TetherService.ACTION_STOP));
+                }
+                openDelayed();
             }
             if (!delayed && TetherService.get() == null) findCamera();
         }});
         return b;
     }
 
-    /** Delayed mode: open PTP + Sony handshake, then hand the session to DelayedActivity. */
-    private void openDelayed(final UsbDevice d) {
-        toast("Membuka kamera (Delayed)…");
-        new Thread(new Runnable() { @Override public void run() {
-            Ptp ptp = null;
-            try {
-                ptp = Ptp.open(usb, d);
-                ptp.setLogger(new Ptp.Logger() { @Override public void log(String s) { Log.d("Delayed", s); } });
-                ptp.drain();
-                Ptp.DeviceInfo di = null;
-                for (int attempt = 1; attempt <= 3; attempt++) {
-                    try { di = ptp.getDeviceInfo(); break; }
-                    catch (IOException e) { ptp.resetDevice(); }
-                }
-                if (di == null) throw new IOException("Kamera tidak membalas");
-                ptp.openSession();
-                if (di.supportsOp(Ptp.OC_Sony_SDIOConnect)) {
-                    try { ptp.sonyHandshake(); } catch (IOException e) { Log.d("Delayed", "Handshake Sony: " + e.getMessage()); }
-                }
-                DelayedActivity.sharedPtp = ptp;
-                DelayedActivity.sharedDevice = d;
-                runOnUiThread(new Runnable() { @Override public void run() {
-                    startActivity(new Intent(MainActivity.this, DelayedActivity.class));
-                }});
-            } catch (final Exception e) {
-                final String msg = e.getMessage();
-                if (ptp != null) try { ptp.close(); } catch (Exception ignored) {}
-                runOnUiThread(new Runnable() { @Override public void run() { toast("Gagal buka kamera (Delayed): " + msg); } });
-            }
-        }}).start();
+    /** Delayed mode: no camera needed. Just open the SAF SD browser (USB Connection = Mass Storage). */
+    private void openDelayed() {
+        startActivity(new Intent(MainActivity.this, DelayedActivity.class));
     }
 
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
@@ -649,13 +628,13 @@ public class MainActivity extends Activity implements TetherService.Listener {
             String a = i.getAction();
             if (ACTION_USB_PERMISSION.equals(a)) {
                 if (d != null && i.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
-                    if (delayedMode()) openDelayed(d); else TetherService.start(MainActivity.this, d);
+                    if (!delayedMode()) TetherService.start(MainActivity.this, d);
                 } else toast("Kebenaran USB ditolak");
             } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(a)) {
                 TetherService s = TetherService.get();
                 if (s != null) s.detached(d);
             } else if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(a)) {
-                if (d != null && Ptp.findPtpInterface(d) != null) askUsb(d);
+                if (d != null && !delayedMode() && Ptp.findPtpInterface(d) != null) askUsb(d);
             }
         }
     };
