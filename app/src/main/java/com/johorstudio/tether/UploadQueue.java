@@ -36,7 +36,7 @@ public class UploadQueue extends Thread {
     }
 
     static class Job {
-        String id, uri, name, eventId, uploadId, file, t480, t1600, ref;
+        String id, uri, name, eventId, uploadId, file, t480, t1600, key;
         int quality, attempts;
         boolean original;
 
@@ -45,10 +45,10 @@ public class UploadQueue extends Thread {
             o.put("id", id); o.put("uri", uri); o.put("name", name); o.put("eventId", eventId);
             o.put("quality", quality); o.put("attempts", attempts); o.put("original", original);
             if (uploadId != null) o.put("uploadId", uploadId);
+            if (key != null) o.put("key", key);
             if (file != null) o.put("file", file);
             if (t480 != null) o.put("t480", t480);
             if (t1600 != null) o.put("t1600", t1600);
-            if (ref != null) o.put("ref", ref);
             return o;
         }
         static Job of(JSONObject o) {
@@ -57,10 +57,10 @@ public class UploadQueue extends Thread {
             j.eventId = o.optString("eventId"); j.quality = o.optInt("quality", 50); j.attempts = o.optInt("attempts");
             j.original = o.optBoolean("original");
             j.uploadId = o.has("uploadId") ? o.optString("uploadId") : null;
+            j.key = o.has("key") ? o.optString("key") : null;
             j.file = o.has("file") ? o.optString("file") : null;
             j.t480 = o.has("t480") ? o.optString("t480") : null;
             j.t1600 = o.has("t1600") ? o.optString("t1600") : null;
-            j.ref = o.has("ref") ? o.optString("ref") : null;
             return j;
         }
     }
@@ -68,7 +68,10 @@ public class UploadQueue extends Thread {
     private final Context ctx;
     private final ContentResolver cr;
     private final Listener listener;
-    private final File store, work;
+    private final File store, work, logFile;
+    /** Upload history (newest last): {name, key, state, at}. state: ok | dup | bad */
+    private final JSONArray history = new JSONArray();
+    private static final int HISTORY_MAX = 400;
     private final List<Job> jobs = new ArrayList<>();
     private volatile LiveApi api;
     private volatile Success success;
@@ -78,6 +81,7 @@ public class UploadQueue extends Thread {
     public UploadQueue(Context ctx, LiveApi api, Listener l) {
         this.ctx = ctx; this.cr = ctx.getContentResolver(); this.api = api; this.listener = l;
         store = new File(ctx.getFilesDir(), "upload-queue.json");
+        logFile = new File(ctx.getFilesDir(), "upload-log.json");
         work = new File(ctx.getFilesDir(), "upload-work");
         work.mkdirs();
         load();
@@ -93,18 +97,79 @@ public class UploadQueue extends Thread {
     /** Network came back etc.: try now instead of waiting for the backoff. */
     public synchronized void kick() { notifyAll(); }
 
-    public synchronized void add(Uri uri, String name, String eventId, int quality) {
-        add(uri, name, eventId, quality, null);
-    }
+    public synchronized void add(Uri uri, String name, String eventId, int quality) { add(uri, name, eventId, quality, null); }
 
-    public synchronized void add(Uri uri, String name, String eventId, int quality, String ref) {
+    /** Queue a photo. With a key (name|size|time taken), photos already queued or sent are skipped. Returns false when skipped. */
+    public synchronized boolean add(Uri uri, String name, String eventId, int quality, String key) {
+        if (key != null) {
+            for (Job x : jobs) if (key.equals(x.key)) { listener.onLog("Sudah dalam giliran: " + name); return false; }
+            String st = stateOf(key);
+            if ("ok".equals(st) || "dup".equals(st)) { listener.onLog("Sudah dihantar sebelum ini: " + name); return false; }
+        }
         Job j = new Job();
         j.id = Long.toString(System.currentTimeMillis(), 36) + Integer.toString((int) (Math.random() * 1296), 36);
-        j.uri = uri.toString(); j.name = name; j.eventId = eventId; j.quality = quality; j.ref = ref;
+        j.uri = uri.toString(); j.name = name; j.eventId = eventId; j.quality = quality; j.key = key;
         jobs.add(j);
         save();
         notifyAll();
         listener.onQueue(jobs.size(), uploaded);
+        return true;
+    }
+
+    /** Mark files the server already has (from /api/shoot/check) so they are not queued. */
+    public synchronized void markSent(String name, String key) { record(name, key, "dup"); }
+
+    private synchronized String stateOf(String key) {
+        for (int i = history.length() - 1; i >= 0; i--) {
+            JSONObject o = history.optJSONObject(i);
+            if (o != null && key.equals(o.optString("key"))) return o.optString("state");
+        }
+        return null;
+    }
+
+    private synchronized void record(String name, String key, String state) {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("name", name); o.put("state", state); o.put("at", System.currentTimeMillis());
+            if (key != null) o.put("key", key);
+            history.put(o);
+            while (history.length() > HISTORY_MAX) history.remove(0);
+            File tmp = new File(logFile.getPath() + ".tmp");
+            FileOutputStream out = new FileOutputStream(tmp);
+            out.write(history.toString().getBytes("UTF-8"));
+            out.close();
+            tmp.renameTo(logFile);
+        } catch (Exception ignored) {}
+    }
+
+    /** Rows for the "Senarai upload" screen, newest first: {name, status text}. */
+    public synchronized List<String[]> rows() {
+        List<String[]> out = new ArrayList<>();
+        for (int i = jobs.size() - 1; i >= 0; i--) {
+            Job j = jobs.get(i);
+            out.add(new String[] { j.name, i == 0 ? (j.attempts > 0 ? "Cuba semula (" + j.attempts + ")" : "Sedang dihantar") : "Menunggu" });
+        }
+        java.text.SimpleDateFormat f = new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US);
+        for (int i = history.length() - 1; i >= 0; i--) {
+            JSONObject o = history.optJSONObject(i);
+            if (o == null) continue;
+            String st = o.optString("state");
+            out.add(new String[] { o.optString("name"), ("ok".equals(st) ? "Sudah ✓" : "dup".equals(st) ? "Dah ada di galeri" : "Gagal") + " · " + f.format(new java.util.Date(o.optLong("at"))) });
+        }
+        return out;
+    }
+
+    /** name|size|EXIF time taken (or m<last modified>): the same key the web page makes, so a photo is never sent twice. */
+    public static String keyFor(ContentResolver cr, Uri uri, String name, long size, long lastModified) {
+        String t = null;
+        InputStream in = null;
+        try {
+            in = cr.openInputStream(uri);
+            if (in != null) t = new android.media.ExifInterface(in).getAttribute(android.media.ExifInterface.TAG_DATETIME_ORIGINAL);
+        } catch (Exception ignored) {
+        } finally { try { if (in != null) in.close(); } catch (IOException ignored) {} }
+        if (t == null || t.trim().isEmpty() || t.startsWith("0000")) t = "m" + lastModified;
+        return name + "|" + size + "|" + t.trim();
     }
 
     /** Drop jobs of another event (e.g. the event was deleted). */
@@ -130,6 +195,13 @@ public class UploadQueue extends Thread {
         } catch (Exception e) {
             listener.onLog("Giliran lama tidak dapat dibaca: " + e.getMessage());
         }
+        try {
+            if (logFile.exists()) {
+                byte[] b = readFile(logFile.getPath());
+                JSONArray a = new JSONArray(new String(b, "UTF-8"));
+                for (int i = 0; i < a.length(); i++) history.put(a.get(i));
+            }
+        } catch (Exception ignored) {}
     }
 
     private synchronized void save() {
@@ -172,17 +244,18 @@ public class UploadQueue extends Thread {
                 continue;
             }
             try {
-                process(a, j);
-                uploaded++;
-                final String doneName = j.name, doneRef = j.ref;
+                boolean dup = process(a, j);
+                if (!dup) uploaded++;
+                record(j.name, j.key, dup ? "dup" : "ok");
+                final String doneName = j.name, doneKey = j.key;
                 finish(j);
                 backoff = 3000;
                 listener.onServer("bersambung ✓ " + hostOf(a.via()), true);
-                listener.onLog("Server ✓ " + j.name);
+                listener.onLog(dup ? "Dah ada di galeri, tak dihantar lagi: " + j.name : "Server ✓ " + j.name);
                 listener.onQueue(pending(), uploaded);
                 listener.onStage("Siap: " + j.name);
                 Success sc = success;
-                if (sc != null) sc.onSuccess(doneName, doneRef);
+                if (sc != null) sc.onSuccess(doneName, doneKey);
             } catch (LiveApi.ApiException e) {
                 if (e.retryable()) {
                     j.attempts++;
@@ -197,6 +270,7 @@ public class UploadQueue extends Thread {
                     save();
                 } else {
                     listener.onLog("Upload " + j.name + " ditolak: " + e.getMessage() + " (gambar kekal dalam telefon)");
+                    record(j.name, j.key, "bad");
                     listener.onServer("ralat: " + e.getMessage(), false);
                     finish(j);
                     listener.onQueue(pending(), uploaded);
@@ -211,6 +285,7 @@ public class UploadQueue extends Thread {
                 listener.onLog("Upload " + j.name + ": " + e.getMessage());
                 if (j.attempts >= 8 && e instanceof java.io.FileNotFoundException) {
                     listener.onLog("Fail tiada dalam telefon lagi, dibuang dari giliran: " + j.name);
+                    record(j.name, j.key, "bad");
                     finish(j);
                     listener.onQueue(pending(), uploaded);
                 } else sleepWait(backoff);
@@ -227,8 +302,10 @@ public class UploadQueue extends Thread {
         return url.replaceFirst("^https?://", "");
     }
 
-    private void process(LiveApi a, Job j) throws Exception {
+    /** Returns true when the server already had this photo (nothing sent). */
+    private boolean process(LiveApi a, Job j) throws Exception {
         Uri uri = Uri.parse(j.uri);
+        if (j.key == null) { j.key = keyFor(cr, uri, j.name, sizeOf(uri), 0); save(); }
         // 1) convert (once; result kept on disk so a restart doesn't redo it)
         if (j.t480 == null) {
             PhotoEncoder enc = new PhotoEncoder(cr);
@@ -262,10 +339,11 @@ public class UploadQueue extends Thread {
             catch (LiveApi.ApiException e) { if (e.status == 404) j.uploadId = null; else throw e; }
         }
         if (j.uploadId == null) {
-            JSONObject s = a.startUpload(j.eventId, sendName, size);
+            JSONObject s = a.startUpload(j.eventId, sendName, size, j.key);
+            if (s.optBoolean("duplicate")) return true;
             j.uploadId = s.getString("id");
             save();
-            offset = 0;
+            offset = s.optLong("received", 0);
         }
         // 3) chunks of 4 MB
         byte[] buf = new byte[4 * 1024 * 1024];
@@ -292,6 +370,7 @@ public class UploadQueue extends Thread {
         if (j.t1600 != null) a.putThumb(j.uploadId, 1600, readFile(j.t1600));
         if (j.t480 != null) a.putThumb(j.uploadId, 480, readFile(j.t480));
         a.complete(j.uploadId);
+        return false;
     }
 
     private long sizeOf(Uri uri) throws IOException {
