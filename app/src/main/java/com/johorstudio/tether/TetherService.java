@@ -460,8 +460,17 @@ public class TetherService extends Service {
                 throw new IOException("Corrupt photo info (invalid filename), try again");
             // JPEG only: RAW (ARW etc.) is never pulled from the camera.
             if (!fname.toLowerCase(Locale.US).matches(".*\\.jpe?g$")) {
-                log("Skipped " + fname + " (not JPEG)");
-                return false;
+                if (!sonyQueue) { log("Skipped " + fname + " (not JPEG)"); return false; }
+                // Sony keeps shots in a queue: a RAW left at the front blocks the JPEG behind it.
+                // Read it into nowhere (nothing saved or sent) so the queue moves on.
+                log("Discarding " + fname + " (not JPEG, " + mb(oi.size & 0xFFFFFFFFL) + ")");
+                setStage("Skipping " + fname + " (RAW)…");
+                Ptp.Response dr = ptp.getObject(handle, new java.io.OutputStream() {
+                    @Override public void write(int b) {}
+                    @Override public void write(byte[] b, int o, int l) {}
+                }, new Ptp.Progress() { @Override public void onProgress(long done, long total) {} });
+                if (!dr.ok()) { log(String.format("Discard failed 0x%04X", dr.code)); return false; }
+                return true;
             }
             String key = fname + "|" + oi.size;
             if (recent.contains(key)) return false;
