@@ -112,6 +112,11 @@ public class MainActivity extends Activity implements TetherService.Listener {
         }
         UsbDevice d = intent == null ? null : (UsbDevice) intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
         if (App.token(this) == null) { showLogin(null); return; }
+        // Camera plugged in while Delayed mode is on: go straight to the SD browser (saved folder opens by itself).
+        if (intent != null && UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(intent.getAction()) && delayedMode()) {
+            if (!DelayedActivity.isOpen()) openDelayed();
+            return;
+        }
         if (d != null) askUsb(d);
         if (!"live".equals(screen)) { showLive(); refreshShoot(false); }
     }
@@ -635,7 +640,8 @@ public class MainActivity extends Activity implements TetherService.Listener {
                 TetherService s = TetherService.get();
                 if (s != null) s.detached(d);
             } else if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(a)) {
-                if (d != null && !delayedMode() && Ptp.findPtpInterface(d) != null) askUsb(d);
+                if (delayedMode()) { if (!DelayedActivity.isOpen()) openDelayed(); }
+                else if (d != null && Ptp.findPtpInterface(d) != null) askUsb(d);
             }
         }
     };

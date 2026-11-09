@@ -22,6 +22,13 @@ public class UploadedStore {
 
     public synchronized boolean isUploaded(String key) { return keys.contains(key); }
 
+    /** True when any stored key starts with name|size| (used before the EXIF time of a file is read). */
+    public synchronized boolean hasNameSize(String name, long size) {
+        String p = name + "|" + size + "|";
+        for (String k : keys) if (k.startsWith(p)) return true;
+        return false;
+    }
+
     public synchronized void markUploaded(String key) {
         if (keys.add(key)) save();
     }

@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.PorterDuff;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.content.ContentResolver;
@@ -21,6 +22,7 @@ import android.widget.Button;
 import android.widget.GridView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.RelativeLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -63,6 +65,27 @@ public class DelayedActivity extends Activity {
     private final List<CameraBrowser.Item> visible = new ArrayList<>();
     private final LinkedHashSet<String> selected = new LinkedHashSet<>(); // documentIds
     private final Set<String> downloading = new HashSet<>();
+    private final Map<String, Integer> copyPct = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Already on the server: stored key, queue history, or (key not read yet) name+size match. */
+    private boolean isUp(CameraBrowser.Item it) {
+        if (it.key != null) {
+            if (store.isUploaded(it.key)) return true;
+            String st = queue != null ? queue.statusOf(it.key) : null;
+            return "ok".equals(st) || "dup".equals(st);
+        }
+        return store.hasNameSize(it.name, it.size);
+    }
+
+    /** Being copied from the card, or waiting/uploading in the queue. */
+    private boolean isWorking(CameraBrowser.Item it) {
+        if (downloading.contains(it.documentId)) return true;
+        return it.key != null && queue != null && "queued".equals(queue.statusOf(it.key));
+    }
+
+    private void refreshGrid() {
+        runOnUiThread(new Runnable() { @Override public void run() { if (!destroyed) rebuildVisible(); } });
+    }
     private final LinkedHashMap<String, Bitmap> thumbCache = new LinkedHashMap<String, Bitmap>(64, 0.75f, true) {
         @Override protected boolean removeEldestEntry(Map.Entry<String, Bitmap> e) { return size() > 120; }
     };
@@ -84,7 +107,7 @@ public class DelayedActivity extends Activity {
             if (sharedQueue == null) {
                 final android.content.Context appCtx = getApplicationContext();
                 sharedQueue = new UploadQueue(appCtx, App.api(this), new UploadQueue.Listener() {
-                    @Override public void onQueue(int p, int up) { DelayedActivity a = current; if (a != null) a.setStatus("Giliran " + p + " · dihantar " + up); }
+                    @Override public void onQueue(int p, int up) { DelayedActivity a = current; if (a != null) { a.setStatus("Giliran " + p + " · dihantar " + up); a.refreshGrid(); } }
                     @Override public void onServer(String text, boolean ok) { DelayedActivity a = current; if (a != null) a.setStatus(text); }
                     @Override public void onStage(String text) { DelayedActivity a = current; if (a != null) a.setStatus(text); }
                     @Override public void onLog(String s) { DelayedActivity a = current; if (a != null) a.log(s); }
@@ -106,6 +129,9 @@ public class DelayedActivity extends Activity {
             queue = sharedQueue;
             current = this;
         }
+        android.content.IntentFilter uf = new android.content.IntentFilter(android.hardware.usb.UsbManager.ACTION_USB_DEVICE_ATTACHED);
+        if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(usbRx, uf, android.content.Context.RECEIVER_EXPORTED);
+        else registerReceiver(usbRx, uf);
         resolveTree();
     }
 
@@ -115,20 +141,39 @@ public class DelayedActivity extends Activity {
         if (browser != null) browser.cancel();
         // The upload queue keeps running so uploads finish; it owns the copied cache files.
         if (current == this) current = null;
+        waitHandler.removeCallbacksAndMessages(null);
+        try { unregisterReceiver(usbRx); } catch (Exception ignored) {}
     }
 
     // ------------------------------------------------------------------ SAF tree
 
+    private final android.os.Handler waitHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private int waitTries;
+    private final android.content.BroadcastReceiver usbRx = new android.content.BroadcastReceiver() {
+        @Override public void onReceive(android.content.Context c, Intent i) { resolveTree(); }
+    };
+
+    static boolean isOpen() { return current != null; }
+
+    /** Open the folder chosen before. The card needs a few seconds to mount after plugging, so wait for it
+     *  instead of asking for the folder again. The picker only opens when no folder was ever chosen. */
     private void resolveTree() {
+        waitHandler.removeCallbacksAndMessages(null);
         String saved = App.prefs(this).getString("delayed_tree", null);
         if (saved == null) { openPicker(); return; }
-        Uri tree = Uri.parse(saved);
-        if (treeUsable(tree)) startBrowse(tree);
-        else {
-            App.prefs(this).edit().remove("delayed_tree").apply();
-            toast("Kebenaran kad hilang atau kad tiada. Pilih folder DCIM semula.");
-            openPicker();
+        waitTries = 0;
+        tryOpen(Uri.parse(saved));
+    }
+
+    private void tryOpen(final Uri tree) {
+        if (destroyed) return;
+        if (treeUsable(tree)) { startBrowse(tree); return; }
+        if (waitTries++ >= 20) {
+            setStatus("Kad kamera tak dikesan. Cucuk kamera (Mass Storage) atau tekan Tukar kad.");
+            return;
         }
+        setStatus("Menunggu kad kamera… (" + waitTries + ")");
+        waitHandler.postDelayed(new Runnable() { @Override public void run() { tryOpen(tree); } }, 1500);
     }
 
     private boolean treeUsable(Uri tree) {
@@ -268,10 +313,9 @@ public class DelayedActivity extends Activity {
         root.addView(uploadBtn, uplp);
 
         grid = new GridView(this);
-        grid.setNumColumns(GridView.AUTO_FIT);
-        grid.setColumnWidth(dp(96));
-        grid.setHorizontalSpacing(dp(4));
-        grid.setVerticalSpacing(dp(4));
+        grid.setNumColumns(3);
+        grid.setHorizontalSpacing(1);
+        grid.setVerticalSpacing(1);
         grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
         grid.setPadding(0, dp(4), 0, dp(4));
         adapter = new Adapter();
@@ -329,7 +373,7 @@ public class DelayedActivity extends Activity {
     private void rebuildVisible() {
         visible.clear();
         for (CameraBrowser.Item it : items) {
-            if (!filterNewOnly || it.key == null || !store.isUploaded(it.key)) visible.add(it);
+            if (!filterNewOnly || !isUp(it)) visible.add(it);
         }
         adapter.notifyDataSetChanged();
         updateCount();
@@ -450,6 +494,7 @@ public class DelayedActivity extends Activity {
                     lastUi[0] = now;
                     final long d = done, total = it.size;
                     setStatus("Menyalin " + it.name + (total > 0 ? " " + (int) (d * 100 / total) + "%" : ""));
+                    if (total > 0) { copyPct.put(it.documentId, (int) (d * 100 / total)); runOnUiThread(new Runnable() { @Override public void run() { adapter.notifyDataSetChanged(); } }); }
                 }
             }
         } finally {
@@ -461,7 +506,7 @@ public class DelayedActivity extends Activity {
 
     private void markState(final CameraBrowser.Item it, final boolean on) {
         runOnUiThread(new Runnable() { @Override public void run() {
-            if (on) downloading.add(it.documentId); else downloading.remove(it.documentId);
+            if (on) downloading.add(it.documentId); else { downloading.remove(it.documentId); copyPct.remove(it.documentId); }
             adapter.notifyDataSetChanged();
         }});
     }
@@ -469,7 +514,7 @@ public class DelayedActivity extends Activity {
     // ------------------------------------------------------------------ grid adapter
 
     private class Adapter extends BaseAdapter {
-        class Holder { ImageView img; TextView badge; TextView time; }
+        class Holder { ImageView img; View ring; TextView badge; TextView time; ProgressBar pb; }
 
         /** Time only, 12-hour with AM/PM (e.g. 4:20 PM). EXIF time from the key when known, else file time. */
         private String timeLabel(CameraBrowser.Item it) {
@@ -492,14 +537,20 @@ public class DelayedActivity extends Activity {
         @Override public long getItemId(int i) { return i; }
 
         @Override public View getView(int position, View convert, ViewGroup parent) {
+            // square cells that exactly fill the grid width: 3 columns, 1 px gaps
+            int gw = parent.getWidth() - parent.getPaddingLeft() - parent.getPaddingRight();
+            final int cell = (gw > 0 ? gw : getResources().getDisplayMetrics().widthPixels - dp(32)) - 2;
+            final int cellSize = cell / 3;
             Holder h;
             if (convert == null) {
                 RelativeLayout r = new RelativeLayout(DelayedActivity.this);
-                r.setLayoutParams(new AbsListView.LayoutParams(dp(96), dp(96)));
+                
                 ImageView img = new ImageView(DelayedActivity.this);
                 img.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 img.setId(View.generateViewId());
                 r.addView(img, new RelativeLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                View ring = new View(DelayedActivity.this);
+                r.addView(ring, new RelativeLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
                 TextView badge = new TextView(DelayedActivity.this);
                 badge.setTextSize(11);
                 badge.setTextColor(Color.WHITE);
@@ -519,29 +570,51 @@ public class DelayedActivity extends Activity {
                 RelativeLayout.LayoutParams tp = new RelativeLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
                 tp.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
                 tp.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
+                tp.setMargins(0, 0, 0, dp(5));
                 r.addView(tm, tp);
+                ProgressBar pb = new ProgressBar(DelayedActivity.this, null, android.R.attr.progressBarStyleHorizontal);
+                pb.setMax(100);
+                RelativeLayout.LayoutParams pp = new RelativeLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(5));
+                pp.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
+                r.addView(pb, pp);
                 h = new Holder();
                 h.img = img;
                 h.badge = badge;
                 h.time = tm;
+                h.ring = ring;
+                h.pb = pb;
                 r.setTag(h);
                 convert = r;
             } else {
                 h = (Holder) convert.getTag();
             }
+            convert.setLayoutParams(new AbsListView.LayoutParams(cellSize, cellSize));
             final CameraBrowser.Item it = visible.get(position);
             String id = it.documentId;
-            boolean up = it.key != null && store.isUploaded(it.key);
+            boolean up = isUp(it);
+            boolean working = !up && isWorking(it);
             boolean sel = selected.contains(id);
-            if (downloading.contains(id)) { h.badge.setText("↻"); h.badge.setBackground(circle(AMBER)); }
-            else if (up) { h.badge.setText("✓"); h.badge.setBackground(circle(GREEN)); }
+            if (up) { h.badge.setText("✓"); h.badge.setBackground(circle(GREEN)); }
+            else if (working) { h.badge.setText("↻"); h.badge.setBackground(circle(RED)); }
             else if (sel) { h.badge.setText("✓"); h.badge.setBackground(circle(TEAL)); }
             else { h.badge.setText(""); h.badge.setBackground(null); }
 
             GradientDrawable bg = new GradientDrawable();
             bg.setColor(CARD);
-            if (sel && !up) bg.setStroke(dp(2), TEAL_LIGHT);
             h.img.setBackground(bg);
+            // highlight ring on top of the picture: red while copying/uploading, teal when selected
+            GradientDrawable ring = new GradientDrawable();
+            ring.setColor(Color.TRANSPARENT);
+            if (working) ring.setStroke(dp(3), RED);
+            else if (sel && !up) ring.setStroke(dp(2), TEAL_LIGHT);
+            h.ring.setBackground(ring);
+            // progress bar: real percent while copying from the card, endless while queued/uploading
+            if (working) {
+                Integer pct = copyPct.get(id);
+                h.pb.setVisibility(View.VISIBLE);
+                if (downloading.contains(id) && pct != null) { h.pb.setIndeterminate(false); h.pb.setProgress(pct); h.pb.setProgressTintList(android.content.res.ColorStateList.valueOf(RED)); h.pb.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(0x99000000)); }
+                else { h.pb.setIndeterminate(true); h.pb.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(RED)); }
+            } else h.pb.setVisibility(View.GONE);
 
             h.time.setText(timeLabel(it));
             h.img.setTag(id);
