@@ -9,6 +9,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- largeHeap: one 42 MP bitmap is ~170 MB while converting to WebP.
          usesCleartextTraffic: admins may use http://m10:8095 over Tailscale. -->
@@ -41,6 +42,19 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="jstether" android:host="auth" />
             </intent-filter>
+            <!-- Photographer join links -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="live.johorstudio.com" android:pathPrefix="/join/" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="jstether" android:host="login" />
+            </intent-filter>
         </activity>
 
         <activity
@@ -57,5 +71,9 @@
             android:name=".TetherService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice|dataSync" />
+
+        <receiver
+            android:name=".Updater$UpdateReceiver"
+            android:exported="false" />
     </application>
 </manifest>

@@ -62,7 +62,7 @@ public class PhotosActivity extends Activity {
     private GridView grid;
     private Adapter adapter;
     private Button deleteBtn;
-    private TextView tvStatus;
+    private TextView tvStatus, tvBrand;
 
     private ExecutorService pool;
     private final LruCache<String, Bitmap> cache = new LruCache<String, Bitmap>(4 * 1024 * 1024) {
@@ -143,6 +143,7 @@ public class PhotosActivity extends Activity {
 
         TextView brand = text("JOHORSTUDIO.COM · LIVE (v" + App.version(PhotosActivity.this) + ")", 12, TEAL_LIGHT, true);
         brand.setLetterSpacing(0.1f);
+        tvBrand = brand;
         root.addView(brand);
         root.addView(text("Uploaded photos", 22, Color.WHITE, true));
 
@@ -200,6 +201,32 @@ public class PhotosActivity extends Activity {
         root.addView(grid, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
         setContentView(root);
+        applyUpdate();
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        applyUpdate();
+    }
+
+    /** Colour the brand header when the server has a newer APK; otherwise leave it teal. */
+    private void applyUpdate() {
+        Updater.check(this, new Updater.Callback() {
+            @Override public void onResult(final String v) {
+                if (tvBrand == null) return;
+                if (v != null) {
+                    tvBrand.setText("JOHORSTUDIO.COM · LIVE (v" + App.version(PhotosActivity.this) + " → v" + v + " tap to update)");
+                    tvBrand.setTextColor(RED);
+                    tvBrand.setOnClickListener(new View.OnClickListener() {
+                        @Override public void onClick(View view) { Updater.promptUpdate(PhotosActivity.this); }
+                    });
+                } else {
+                    tvBrand.setText("JOHORSTUDIO.COM · LIVE (v" + App.version(PhotosActivity.this) + ")");
+                    tvBrand.setTextColor(TEAL_LIGHT);
+                    tvBrand.setOnClickListener(null);
+                }
+            }
+        });
     }
 
     // ------------------------------------------------------------------ loading

@@ -5,6 +5,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -246,5 +248,87 @@ public class LiveApi {
     /** Download a photo image (480 or 1600). Returns the raw image bytes. */
     public byte[] photoBytes(String id, int size) throws IOException {
         return callBinary("GET", "/api/shoot/photos/" + id + "/" + size, 30000);
+    }
+
+    // ------------------------------------------------------------ in-app update
+
+    /** Current APK from the server: {apk:{name,version,size,tag,published}|null}. */
+    public JSONObject appInfo() throws IOException {
+        return json("GET", "/api/shoot/app", null);
+    }
+
+    /** Stream the APK to dest (via dest+".part" then rename), reporting percent to p (-1 = unknown). */
+    public void downloadApk(File dest, Updater.Progress p) throws IOException {
+        File dir = dest.getParentFile();
+        if (dir != null && !dir.exists()) dir.mkdirs();
+        File part = new File(dest.getPath() + ".part");
+        boolean done = false;
+        if (fastUrl != null) {
+            try {
+                streamDownload(fastUrl, "/api/shoot/app.apk", part, p);
+                working = fastUrl;
+                done = true;
+            } catch (ApiException e) {
+                working = fastUrl;
+                throw e;            // the server answered: a real error, not a network problem
+            } catch (IOException ignored) {
+                part.delete();      // Tailscale off or unreachable: use the public domain
+            }
+        }
+        if (!done) {
+            try {
+                part.delete();
+                streamDownload(publicUrl, "/api/shoot/app.apk", part, p);
+                working = publicUrl;
+            } catch (ApiException e) {
+                throw e;
+            } catch (IOException e) {
+                throw new ApiException(0, "No connection to server (" + e.getMessage() + ")", null);
+            }
+        }
+        if (!part.renameTo(dest)) throw new IOException("Failed to save " + dest.getName());
+    }
+
+    private void streamDownload(String base, String path, File part, Updater.Progress p) throws IOException {
+        HttpURLConnection c = (HttpURLConnection) new URL(base + path).openConnection();
+        c.setConnectTimeout(base.equals(fastUrl) ? 2500 : 10000);
+        c.setReadTimeout(120000);
+        c.setRequestMethod("GET");
+        c.setRequestProperty("Accept", "application/vnd.android.package-archive,application/octet-stream,*/*");
+        c.setRequestProperty("User-Agent", "JSTether/4");
+        if (token != null) c.setRequestProperty("Authorization", "Bearer " + token);
+        InputStream in = null;
+        OutputStream out = null;
+        try {
+            int code = c.getResponseCode();
+            if (code >= 400) {
+                InputStream err = c.getErrorStream();
+                String text = err == null ? "" : readAll(err);
+                JSONObject json;
+                try { json = text.isEmpty() ? new JSONObject() : new JSONObject(text); }
+                catch (JSONException e) { json = new JSONObject(); }
+                throw new ApiException(code, json.optString("error", "HTTP " + code), json);
+            }
+            in = c.getInputStream();
+            long total = c.getContentLengthLong();
+            out = new FileOutputStream(part);
+            byte[] buf = new byte[64 * 1024];
+            long done = 0, lastUi = 0;
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+                done += n;
+                long now = System.currentTimeMillis();
+                if (p != null && (now - lastUi > 200 || (total > 0 && done >= total))) {
+                    lastUi = now;
+                    p.onProgress(total > 0 ? (int) (done * 100 / total) : -1);
+                }
+            }
+            out.flush();
+        } finally {
+            if (in != null) try { in.close(); } catch (IOException ignored) {}
+            if (out != null) try { out.close(); } catch (IOException ignored) {}
+            c.disconnect();
+        }
     }
 }

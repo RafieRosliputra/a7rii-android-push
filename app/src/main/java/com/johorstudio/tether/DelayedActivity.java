@@ -94,7 +94,7 @@ public class DelayedActivity extends Activity {
     private boolean busy = false;
     private volatile boolean destroyed = false;
     private Adapter adapter;
-    private TextView tvStatus, logView;
+    private TextView tvStatus, logView, tvBrand;
     private ScrollView logScroll;
     private Button uploadBtn, filterBtn;
     private GridView grid;
@@ -289,6 +289,7 @@ public class DelayedActivity extends Activity {
 
         TextView brand = text("JOHORSTUDIO.COM · LIVE (v" + App.version(DelayedActivity.this) + ")", 12, TEAL_LIGHT, true);
         brand.setLetterSpacing(0.1f);
+        tvBrand = brand;
         root.addView(brand);
         root.addView(text("Import from SD (Delayed)", 22, Color.WHITE, true));
         root.addView(text("Camera setup: MENU > Setup > USB Connection > Mass Storage, then plug in the USB cable", 14, AMBER, true));
@@ -350,6 +351,32 @@ public class DelayedActivity extends Activity {
         root.addView(logScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(120)));
 
         setContentView(root);
+        applyUpdate();
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        applyUpdate();
+    }
+
+    /** Colour the brand header when the server has a newer APK; otherwise leave it teal. */
+    private void applyUpdate() {
+        Updater.check(this, new Updater.Callback() {
+            @Override public void onResult(final String v) {
+                if (tvBrand == null) return;
+                if (v != null) {
+                    tvBrand.setText("JOHORSTUDIO.COM · LIVE (v" + App.version(DelayedActivity.this) + " → v" + v + " tap to update)");
+                    tvBrand.setTextColor(RED);
+                    tvBrand.setOnClickListener(new View.OnClickListener() {
+                        @Override public void onClick(View view) { Updater.promptUpdate(DelayedActivity.this); }
+                    });
+                } else {
+                    tvBrand.setText("JOHORSTUDIO.COM · LIVE (v" + App.version(DelayedActivity.this) + ")");
+                    tvBrand.setTextColor(TEAL_LIGHT);
+                    tvBrand.setOnClickListener(null);
+                }
+            }
+        });
     }
 
     // ------------------------------------------------------------------ browse callbacks (main thread)
